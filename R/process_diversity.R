@@ -4,18 +4,68 @@ library(tidyverse)
 
 biodiversity <- readRDS("Data/6fa1dedf-c546-41e0-a470-17c4863686b8.rds")
 
+# Biomas por regiao ----
+# Cada vetor lista os biomas (nomenclatura WWF, como aparecem em `Biome`)
+# considerados equivalentes a cada regiao do Brasil. Sao usados tanto para
+# recortar o Realm "Neotropic" quanto para montar as versoes "globais"
+# (todos os realms, restritos aos mesmos biomas da regiao).
+# Obs.: os nomes precisam usar "&" (ex.: "Tropical & Subtropical..."), que e
+# a grafia usada na coluna Biome do PREDICTS -- usar "and" no lugar de "&"
+# faz o filtro nao casar com nada.
+
+Bioma_NE <- c(
+  "Tropical & Subtropical Moist Broadleaf Forests",
+  "Tropical & Subtropical Dry Broadleaf Forests",
+  "Deserts & Xeric Shrublands",
+  "Tropical & Subtropical Grasslands, Savannas & Shrublands"
+)
+
+Bioma_CO <- c(
+  "Tropical & Subtropical Grasslands, Savannas & Shrublands",
+  "Flooded Grasslands & Savannas",
+  "Tropical & Subtropical Dry Broadleaf Forests",
+  "Tropical & Subtropical Moist Broadleaf Forests"
+)
+
+Bioma_SE <- c(
+  "Tropical & Subtropical Grasslands, Savannas & Shrublands",
+  "Tropical & Subtropical Moist Broadleaf Forests",
+  "Tropical & Subtropical Dry Broadleaf Forests",
+  "Deserts & Xeric Shrublands"
+)
+
+Bioma_N <- c(
+  "Tropical & Subtropical Grasslands, Savannas & Shrublands",
+  "Tropical & Subtropical Moist Broadleaf Forests",
+  "Tropical & Subtropical Dry Broadleaf Forests"
+)
+
+Bioma_S <- c(
+  "Temperate Grasslands, Savannas & Shrublands",
+  "Tropical & Subtropical Moist Broadleaf Forests",
+  "Flooded Grasslands & Savannas",
+  "Tropical & Subtropical Grasslands, Savannas & Shrublands"
+)
+
+# uniao de todos os biomas das regioes brasileiras (equivalente ao antigo biome_br)
+biome_br <- unique(c(Bioma_NE, Bioma_CO, Bioma_SE, Bioma_N, Bioma_S))
+
 # De Palma processes ----
 # Recebe os dados brutos do PREDICTS, filtra por realm e biomas de interesse
-# e aplica as regras de reclassificacao de LandUse (De Palma et al.)
-process_diversity <- function(data, realm, biome) {
+# e aplica as regras de reclassificacao de LandUse (De Palma et al.).
+# realm = NULL mantem todos os realms (versao "global"); um vetor filtra um
+# ou mais realms especificos (ex.: "Neotropic", ou c("Neotropic", "Afrotropic")).
+process_diversity <- function(data, realm = NULL, biome) {
 
-  realm_data <- data %>%
-    dplyr::filter(Realm == realm)
+  if (!is.null(realm)) {
+    data <- data %>%
+      dplyr::filter(Realm %in% realm)
+  }
 
-  br_neo <- realm_data %>%
+  data <- data %>%
     dplyr::filter(Biome %in% biome)
 
-  diversity <- br_neo |>
+  diversity <- data |>
     # make a level of Primary minimal. Everything else gets the coarse land use
     dplyr::mutate(
       LandUse = ifelse(Predominant_land_use == "Primary vegetation" & Use_intensity == "Minimal use",
@@ -56,15 +106,11 @@ process_diversity <- function(data, realm, biome) {
   diversity
 }
 
-# Exemplo de uso: regiao neotropical, biomas contidos no Brasil
-
-biome_br <- c(
-  "Tropical & Subtropical Moist Broadleaf Forests",
-  "Tropical & Subtropical Dry Broadleaf Forests",
-  "Deserts & Xeric Shrublands",
-  "Temperate Grasslands, Savannas & Shrublands",
-  "Tropical & Subtropical Grasslands, Savannas & Shrublands",
-  "Flooded Grasslands & Savannas"
-)
-
-diversity <- process_diversity(biodiversity, realm = "Neotropic", biome = biome_br)
+# Exemplo de uso: regiao Nordeste, so dados do Neotropico
+# diversity <- process_diversity(biodiversity, realm = "Neotropic", biome = Bioma_NE)
+#
+# Exemplo de uso: regiao Nordeste, dados globais (todos os realms com os
+# mesmos biomas do Nordeste)
+# diversity <- process_diversity(biodiversity, realm = NULL, biome = Bioma_NE)
+#
+# Para rodar todas as combinacoes de uma vez, ver R/run_all_combinations.R
