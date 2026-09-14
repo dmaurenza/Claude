@@ -126,6 +126,13 @@ run_bii_models <- function(dbbiodtotal, biome, realm, combination, custom_landus
     dplyr::mutate(MaxAbundance = max(TotalAbundance)) |>
     dplyr::ungroup() |>
     dplyr::mutate(RescaledAbundance = TotalAbundance / MaxAbundance) |>
+    # descarta linhas com RescaledAbundance faltante -- acontece quando
+    # Effort_corrected_measurement e NA em algum registro (sum() sem na.rm
+    # propaga o NA para TotalAbundance) ou quando MaxAbundance e 0 (0/0 =
+    # NaN, is.na(NaN) tambem e TRUE). Sem esse filtro, essas linhas chegam
+    # ate o lme4::lmer() e derrubam o ajuste do ab_m com "missing values in
+    # object" (na.fail).
+    dplyr::filter(!is.na(RescaledAbundance)) |>
     # o LandUse so tem os niveis que sobreviveram a esse filtro/agregacao
     dplyr::mutate(LandUse = droplevels(LandUse))
 
@@ -224,6 +231,14 @@ run_bii_models <- function(dbbiodtotal, biome, realm, combination, custom_landus
     sqrt(RescaledAbundance) ~ LandUse + (1 | SS) + (1 | SSB),
     data = abundance_data
   )
+
+  # get_bray() retorna NA quando os dois sites comparados tem abundancia
+  # total zero (nenhuma especie registrada em nenhum dos dois -- composicao
+  # indeterminada). Sem descartar essas linhas, o NA se propaga por
+  # car::logit() ate logitCS e derruba o ajuste do cd_m com "missing values
+  # in object" (na.fail).
+  cd_data <- cd_data |>
+    dplyr::filter(!is.na(bray))
 
   cd_data <- dplyr::mutate(
     cd_data,
