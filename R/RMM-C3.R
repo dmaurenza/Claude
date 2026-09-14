@@ -111,6 +111,12 @@ run_bii_models <- function(dbbiodtotal, biome, realm, combination, custom_landus
   # Etapa 2 - Calculate diversity indices ----
   # Total Abundance #####
   abundance_data <- diversity |>
+    # LandUse == NA sao os registros "Cannot decide" (ver process_diversity())
+    # -- precisam ser descartados aqui, do contrario entram no ab_m com
+    # LandUse faltante e o lme4::lmer() falha em model.frame() com
+    # "missing values in object" (na.fail). cd_data_input, logo abaixo, ja
+    # faz esse mesmo filtro.
+    dplyr::filter(!is.na(LandUse)) |>
     dplyr::filter(Diversity_metric_type == "Abundance") |>
     dplyr::group_by(SSBS) |>
     dplyr::mutate(TotalAbundance = sum(Effort_corrected_measurement)) |>
