@@ -16,30 +16,44 @@
 #   5) salva os modelos (ab_m e cd_m) de cada rodada em disco
 #   6) recarrega todos os modelos salvos e roda uma selecao de modelos (AIC)
 #      comparando todas as combinacoes de LandUse rodadas para essa regiao
+# ... e repete os passos 1-6 automaticamente para CADA bioma regional listado
+# em `biome_regioes` abaixo, sempre com realm = "Neotropic".
 #
 # Pre-requisito: rodar o PDM-C3.R inteiro antes deste script, na mesma
 # sessao do R (ele define dbbiodtotal, Bioma_*, Biome_BR, process_diversity()
 # e custom_landuse_list).
 
 # ===== CONFIGURACAO DA REGIAO ==============================================
-# Para rodar para uma regiao/bioma diferente, so mude as 3 linhas abaixo --
-# o resto do script usa essas 3 variaveis em vez de valores fixos, entao nao
-# tem mais nada pra editar em outro lugar.
-#   biome_regiao : um dos vetores definidos no PDM-C3.R
-#                  (Bioma_NE, Bioma_CO, Bioma_SE, Bioma_N, Bioma_S), ou
-#                  Biome_BR para todas as regioes brasileiras de uma vez
-#   realm_regiao : "Neotropic" para restringir ao Neotropico, ou NULL para
-#                  a versao "global" (todos os realms, mesmos biomas)
-#   combination  : nome usado no arquivo de saida (Output/<combination>.csv)
-#                  -- troque junto com biome_regiao para nao sobrescrever
-#                  o resultado de uma regiao anterior
-biome_regiao <- Biome_BR
-realm_regiao <- c("Neotropic", "Afrotropic", "Indo-Malay", "Australasia")
-combination  <- "Alltropic_BR"
+# Este script roda sempre com realm = "Neotropic", uma vez para cada um dos
+# biomas regionais definidos no PDM-C3.R (Bioma_NE, Bioma_CO, Bioma_SE,
+# Bioma_N, Bioma_S), e mais uma vez para a uniao de todos eles (Biome_BR).
+#
+# `combination` (usado para nomear os arquivos de saida em Output/ e os
+# modelos em Output/Models/) e montado automaticamente como
+# "<realm_regiao>_<nome do bioma>" (ex.: "Neotropic_NE") dentro de
+# run_region() -- nao e mais digitado a mao, entao o nome do arquivo nao tem
+# como ficar dessincronizado da regiao/bioma realmente rodado.
+#
+# Para rodar outros realms (Afrotropic, Indo-Malay, Australasia, ou uma
+# combinacao deles), troque `realm_regiao` abaixo e rode o script de novo --
+# cada realm precisa da sua propria rodada manual, ja que os arquivos de
+# saida de uma rodada anterior nao sao sobrescritos (ver trava de seguranca
+# na Etapa 5, dentro de run_region()).
+realm_regiao <- "Neotropic"
+
+biome_regioes <- list(
+  NE = Bioma_NE,
+  CO = Bioma_CO,
+  SE = Bioma_SE,
+  N  = Bioma_N,
+  S  = Bioma_S,
+  BR = Biome_BR
+)
 
 # pasta onde os modelos (ab_m/cd_m) de cada rodada sao salvos (Etapa 3b) e
 # depois recarregados para a selecao de modelos por AIC (Etapa 6)
 model_dir <- "./Output/Models/"
+output_dir <- "./Output/"
 # ============================================================================
 
 # get_bray() fica FORA/ANTES de run_bii_models() de proposito. Se ela (ou
@@ -78,12 +92,15 @@ list_composition <- list()
 # repetidas vezes (uma por filtro) sem duplicar codigo ----
 #
 # run_label identifica a rodada (ex.: "baseline", ou o nome do filtro em
-# custom_landuse_list, como "cropland_A") e e usado, junto com `combination`
-# (definido no bloco de configuracao acima), para nomear os arquivos de
-# modelo salvos na Etapa 3b -- e depois para saber, na Etapa 6, de qual
+# custom_landuse_list, como "cropland_A"). `combination` identifica a
+# regiao/bioma (ex.: "Neotropic_NE") e e recebido explicitamente como
+# parametro -- em vez de lido de uma variavel global -- para nao correr o
+# risco de salvar o modelo de uma rodada com o `combination` de outra (o
+# bug que motivou esse ajuste). Os dois juntos nomeiam os arquivos de
+# modelo salvos na Etapa 3b, e sao usados na Etapa 6 para saber de qual
 # rodada/combinacao de LandUse cada modelo recarregado veio.
 
-run_bii_models <- function(dbbiodtotal, biome, realm, custom_landuse = NULL, run_label) {
+run_bii_models <- function(dbbiodtotal, biome, realm, combination, custom_landuse = NULL, run_label) {
 
   # Etapa 1 - Builting database ----
   diversity <- process_diversity(
@@ -287,105 +304,124 @@ run_bii_models <- function(dbbiodtotal, biome, realm, custom_landuse = NULL, run
 
 }
 
-# Roda o pipeline base (sem filtro customizado) + um por um dos filtros de
-# custom_landuse_list, guardando so a linha da categoria nova de cada rodada ----
-baseline_run <- run_bii_models(dbbiodtotal, biome = biome_regiao, realm = realm_regiao, run_label = "baseline")
+# Roda o pipeline completo (baseline + custom_landuse_list + salvar
+# resultados/R2/modelos + selecao de modelos por AIC) para uma unica
+# combinacao realm_regiao (fixo, "Neotropic") + biome_regiao ----
+run_region <- function(nome_regiao, biome_regiao) {
 
-baseline_results <- baseline_run$results
-baseline_r2 <- dplyr::mutate(baseline_run$r2, filtro = "baseline (categorias padrao)", .before = 1)
+  combination <- paste(realm_regiao, nome_regiao, sep = "_")
+  cat("\n===== Rodando combination =", combination, "=====\n")
 
-# purrr::imap() em vez de purrr::map(): precisamos do nome de cada filtro
-# (cropland_A, cropland_B, ...) dentro do loop, para passar como run_label
-# (usado para nomear os arquivos de modelo salvos na Etapa 3b)
-custom_runs <- purrr::imap(custom_landuse_list, function(spec, nm) {
-  run_bii_models(dbbiodtotal, biome = biome_regiao, realm = realm_regiao, custom_landuse = spec, run_label = nm)
-})
-
-custom_results <- purrr::map2_dfr(custom_runs, custom_landuse_list, function(run, spec) {
-  dplyr::filter(run$results, LandUse == spec$label)
-})
-
-custom_r2 <- purrr::map2_dfr(custom_runs, names(custom_landuse_list), function(run, nm) {
-  dplyr::mutate(run$r2, filtro = nm, .before = 1)
-})
-
-results <- dplyr::bind_rows(baseline_results, custom_results)
-r2_all <- dplyr::bind_rows(baseline_r2, custom_r2)
-
-# Etapa 5 - Saving results ----
-output_dir <- "./Output/"
-if (!dir.exists(output_dir)) {dir.create(output_dir, recursive = TRUE)}
-output_path <- paste0(output_dir, combination, ".csv")
-output_path_r2 <- paste0(output_dir, combination, "_R2.csv")
-
-# trava de seguranca: nao sobrescreve um resultado de outra regiao so porque
-# o "combination" no topo do script nao foi atualizado junto com o
-# biome_regiao/realm_regiao. Se isso acontecer, para aqui com um aviso claro
-# em vez de substituir o arquivo silenciosamente.
-if (file.exists(output_path) || file.exists(output_path_r2)) {
-  stop(
-    "Um dos arquivos ('", output_path, "' ou '", output_path_r2, "') ja existe e NAO sera sobrescrito automaticamente.\n",
-    "Va no bloco 'CONFIGURACAO DA REGIAO' no topo do script e mude o valor de 'combination' ",
-    "(por exemplo, para refletir a regiao/bioma que voce esta rodando agora), depois rode de novo."
+  baseline_run <- run_bii_models(
+    dbbiodtotal, biome = biome_regiao, realm = realm_regiao,
+    combination = combination, run_label = "baseline"
   )
+
+  baseline_results <- baseline_run$results
+  baseline_r2 <- dplyr::mutate(baseline_run$r2, filtro = "baseline (categorias padrao)", .before = 1)
+
+  # purrr::imap() em vez de purrr::map(): precisamos do nome de cada filtro
+  # (cropland_A, cropland_B, ...) dentro do loop, para passar como run_label
+  # (usado para nomear os arquivos de modelo salvos na Etapa 3b)
+  custom_runs <- purrr::imap(custom_landuse_list, function(spec, nm) {
+    run_bii_models(
+      dbbiodtotal, biome = biome_regiao, realm = realm_regiao,
+      combination = combination, custom_landuse = spec, run_label = nm
+    )
+  })
+
+  custom_results <- purrr::map2_dfr(custom_runs, custom_landuse_list, function(run, spec) {
+    dplyr::filter(run$results, LandUse == spec$label)
+  })
+
+  custom_r2 <- purrr::map2_dfr(custom_runs, names(custom_landuse_list), function(run, nm) {
+    dplyr::mutate(run$r2, filtro = nm, .before = 1)
+  })
+
+  results <- dplyr::bind_rows(baseline_results, custom_results)
+  r2_all <- dplyr::bind_rows(baseline_r2, custom_r2)
+
+  # Etapa 5 - Saving results ----
+  if (!dir.exists(output_dir)) {dir.create(output_dir, recursive = TRUE)}
+  output_path <- paste0(output_dir, combination, ".csv")
+  output_path_r2 <- paste0(output_dir, combination, "_R2.csv")
+
+  # trava de seguranca: nao sobrescreve o resultado de uma rodada anterior
+  # dessa mesma combination. Se isso acontecer, para aqui com um aviso claro
+  # em vez de substituir o arquivo silenciosamente -- apague (ou mova) os
+  # arquivos antigos se quiser rodar essa combination de novo.
+  if (file.exists(output_path) || file.exists(output_path_r2)) {
+    stop(
+      "Um dos arquivos ('", output_path, "' ou '", output_path_r2, "') ja existe e NAO sera sobrescrito automaticamente.\n",
+      "Apague (ou mova) os arquivos antigos dessa combination se quiser roda-la de novo."
+    )
+  }
+
+  readr::write_csv(results, output_path)
+  readr::write_csv(r2_all, output_path_r2)
+  cat("Resultado (coeficientes) salvo em:", output_path, "\n")
+  cat("Resultado (R2 dos modelos) salvo em:", output_path_r2, "\n")
+
+  # Etapa 6 - Model selection (AIC) ----
+  # Recarrega TODOS os modelos salvos na Etapa 3b para esta `combination`
+  # (baseline + cada filtro de custom_landuse_list) e compara o ajuste deles
+  # por AIC. A comparacao e feita separadamente por tipo de modelo (abundancia
+  # x composicional), porque cada tipo tem variavel resposta e estrutura de
+  # efeitos aleatorios diferentes -- AIC so e comparavel entre modelos com a
+  # MESMA variavel resposta.
+  model_files <- list.files(
+    model_dir,
+    pattern = paste0("^", combination, "_.*_(ab_m|cd_m)\\.rds$"),
+    full.names = TRUE
+  )
+
+  if (length(model_files) == 0) {
+    stop(
+      "Nenhum modelo salvo encontrado em '", model_dir, "' para combination = '", combination, "'.\n",
+      "Rode a Etapa 3b (dentro de run_bii_models) antes desta etapa."
+    )
+  }
+
+  model_selection <- purrr::map_dfr(model_files, function(f) {
+    m <- readRDS(f)
+
+    # nome do arquivo: <combination>_<run_label>_<tipo>.rds (tipo = ab_m ou cd_m)
+    nm <- tools::file_path_sans_ext(basename(f))
+    nm <- sub(paste0("^", combination, "_"), "", nm)
+    tipo_modelo <- sub(".*_(ab_m|cd_m)$", "\\1", nm)
+    run_label <- sub("_(ab_m|cd_m)$", "", nm)
+
+    ll <- logLik(m)
+
+    data.frame(
+      combination = combination,
+      run_label = run_label,
+      tipo_modelo = tipo_modelo,
+      npar = attr(ll, "df"),
+      logLik = as.numeric(ll),
+      AIC = AIC(m)
+    )
+  })
+
+  # dentro de cada tipo de modelo, ordena do menor pro maior AIC e calcula o
+  # deltaAIC em relacao ao melhor modelo daquele tipo
+  model_selection <- model_selection |>
+    dplyr::group_by(tipo_modelo) |>
+    dplyr::arrange(AIC, .by_group = TRUE) |>
+    dplyr::mutate(deltaAIC = AIC - min(AIC)) |>
+    dplyr::ungroup() |>
+    dplyr::arrange(tipo_modelo, AIC)
+
+  output_path_model_selection <- paste0(output_dir, combination, "_ModelSelection.csv")
+  readr::write_csv(model_selection, output_path_model_selection)
+  cat("Selecao de modelos (AIC) salva em:", output_path_model_selection, "\n")
+  print(model_selection)
+
+  list(results = results, r2 = r2_all, model_selection = model_selection)
 }
 
-readr::write_csv(results, output_path)
-readr::write_csv(r2_all, output_path_r2)
-cat("Resultado (coeficientes) salvo em:", output_path, "\n")
-cat("Resultado (R2 dos modelos) salvo em:", output_path_r2, "\n")
-
-# Etapa 6 - Model selection (AIC) ----
-# Recarrega TODOS os modelos salvos na Etapa 3b para esta `combination`
-# (baseline + cada filtro de custom_landuse_list) e compara o ajuste deles
-# por AIC. A comparacao e feita separadamente por tipo de modelo (abundancia
-# x composicional), porque cada tipo tem variavel resposta e estrutura de
-# efeitos aleatorios diferentes -- AIC so e comparavel entre modelos com a
-# MESMA variavel resposta.
-model_files <- list.files(
-  model_dir,
-  pattern = paste0("^", combination, "_.*_(ab_m|cd_m)\\.rds$"),
-  full.names = TRUE
-)
-
-if (length(model_files) == 0) {
-  stop(
-    "Nenhum modelo salvo encontrado em '", model_dir, "' para combination = '", combination, "'.\n",
-    "Rode a Etapa 3b (dentro de run_bii_models) antes desta etapa."
-  )
-}
-
-model_selection <- purrr::map_dfr(model_files, function(f) {
-  m <- readRDS(f)
-
-  # nome do arquivo: <combination>_<run_label>_<tipo>.rds (tipo = ab_m ou cd_m)
-  nm <- tools::file_path_sans_ext(basename(f))
-  nm <- sub(paste0("^", combination, "_"), "", nm)
-  tipo_modelo <- sub(".*_(ab_m|cd_m)$", "\\1", nm)
-  run_label <- sub("_(ab_m|cd_m)$", "", nm)
-
-  ll <- logLik(m)
-
-  data.frame(
-    combination = combination,
-    run_label = run_label,
-    tipo_modelo = tipo_modelo,
-    npar = attr(ll, "df"),
-    logLik = as.numeric(ll),
-    AIC = AIC(m)
-  )
+# Roda o pipeline completo para realm = "Neotropic", uma vez para cada bioma
+# regional listado em `biome_regioes` (bloco de configuracao no topo) ----
+regioes_results <- purrr::imap(biome_regioes, function(biome_vec, nome_regiao) {
+  run_region(nome_regiao = nome_regiao, biome_regiao = biome_vec)
 })
-
-# dentro de cada tipo de modelo, ordena do menor pro maior AIC e calcula o
-# deltaAIC em relacao ao melhor modelo daquele tipo
-model_selection <- model_selection |>
-  dplyr::group_by(tipo_modelo) |>
-  dplyr::arrange(AIC, .by_group = TRUE) |>
-  dplyr::mutate(deltaAIC = AIC - min(AIC)) |>
-  dplyr::ungroup() |>
-  dplyr::arrange(tipo_modelo, AIC)
-
-output_path_model_selection <- paste0(output_dir, combination, "_ModelSelection.csv")
-readr::write_csv(model_selection, output_path_model_selection)
-cat("Selecao de modelos (AIC) salva em:", output_path_model_selection, "\n")
-print(model_selection)
