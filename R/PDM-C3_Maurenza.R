@@ -13,28 +13,41 @@ bio <- readRDS("Data/5b91276b-9051-4f48-9a5b-b3106730e4ae_release_2022.rds")
 biodiversity <- rbind(biodiversity, bio)
 
 
-# Filtros de Realm ----
-# Cada item agrupa um ou mais "Realm" (nomenclatura WWF, como aparecem em
-# `Realm`) usados nas analises. NULL = mantem todos os realms.
-#   Global      : todos os realms (sem filtro)
+# Biomas do Brasil ----
+# Todos os biomas (nomenclatura WWF, como aparecem em `Biome`) que ocorrem
+# em algum registro com Country == "Brazil" -- calculado direto dos dados,
+# em vez de uma lista fixa de biomas por regiao (a antiga Biome_BR).
+biomas_brasil <- biodiversity |>
+  dplyr::filter(Country == "Brazil") |>
+  dplyr::pull(Biome) |>
+  unique()
+
+# Filtros de regiao ----
+# Os 4 "modelos"/regioes usados nas analises. Cada item tem um filtro de
+# `realm` e/ou de `biome` (NULL = sem filtro naquele campo) a passar para
+# process_diversity() abaixo.
+#   Global      : todos os realms, todos os biomas (sem filtro)
 #   all_tropics : todos os realms tropicais -- Neotropic (America Central e
 #                 America do Sul, incluindo o Brasil inteiro), Afrotropic
 #                 (Africa subsaariana e Madagascar), Indo-Malay (Sul e
 #                 Sudeste Asiatico tropical) e Australasia (Australia, Nova
 #                 Guine e Nova Zelandia)
 #   Neotropics  : apenas o Neotropico
-realm_filtros <- list(
-  Global = NULL,
-  all_tropics = c("Neotropic", "Afrotropic", "Indo-Malay", "Australasia"),
-  Neotropics = "Neotropic"
+#   Brazil      : sem filtro de realm -- inclui dados de QUALQUER
+#                 realm/pais, desde que o Biome seja um dos encontrados no
+#                 Brasil (biomas_brasil, acima)
+regiao_filtros <- list(
+  Global = list(realm = NULL, biome = NULL),
+  all_tropics = list(realm = c("Neotropic", "Afrotropic", "Indo-Malay", "Australasia"), biome = NULL),
+  Neotropics = list(realm = "Neotropic", biome = NULL),
+  Brazil = list(realm = NULL, biome = biomas_brasil)
 )
 
 # De Palma processes ----
-# Recebe os dados brutos do PREDICTS, filtra por realm de interesse e aplica
-# as regras de reclassificacao de LandUse (De Palma et al.).
-# realm = NULL mantem todos os realms (equivalente ao filtro "Global" de
-# realm_filtros); um vetor filtra um ou mais realms especificos (ex.:
-# "Neotropic", ou c("Neotropic", "Afrotropic")) -- ver realm_filtros acima.
+# Recebe os dados brutos do PREDICTS, filtra por realm e/ou bioma de
+# interesse e aplica as regras de reclassificacao de LandUse (De Palma et
+# al.). realm/biome = NULL mantem todos os realms/biomas -- ver
+# regiao_filtros acima para os 4 filtros usados nas analises.
 #
 # custom_landuse (opcional): lista com land_use, intensity (vetor) e label,
 # para isolar uma combinacao especifica de Predominant_land_use + Use_intensity
@@ -42,11 +55,16 @@ realm_filtros <- list(
 # linhas (que nao casarem com o filtro) mantem a classificacao padrao normalmente.
 # Ex.: list(land_use = "Cropland", intensity = c("Light use", "Intense use"),
 #           label = "Cropland_A")
-process_diversity <- function(data, realm = NULL, custom_landuse = NULL) {
+process_diversity <- function(data, realm = NULL, biome = NULL, custom_landuse = NULL) {
 
   if (!is.null(realm)) {
     data <- data |>
       dplyr::filter(Realm %in% realm)
+  }
+
+  if (!is.null(biome)) {
+    data <- data |>
+      dplyr::filter(Biome %in% biome)
   }
 
   diversity <- data |>
@@ -156,16 +174,20 @@ custom_landuse_list <- list(
 )
 
 # Exemplo de uso: todos os realms tropicais, classificacao padrao
-# diversity <- process_diversity(biodiversity, realm = realm_filtros$all_tropics)
+# diversity <- process_diversity(biodiversity, realm = regiao_filtros$all_tropics$realm)
 #
 # Exemplo de uso: apenas o Neotropico
-# diversity <- process_diversity(biodiversity, realm = realm_filtros$Neotropics)
+# diversity <- process_diversity(biodiversity, realm = regiao_filtros$Neotropics$realm)
 #
 # Exemplo de uso: todos os realms (Global), sem filtro
-# diversity <- process_diversity(biodiversity, realm = realm_filtros$Global)
+# diversity <- process_diversity(biodiversity, realm = regiao_filtros$Global$realm)
+#
+# Exemplo de uso: Brazil -- qualquer realm/pais, restrito aos biomas
+# encontrados no Brasil
+# diversity <- process_diversity(biodiversity, biome = regiao_filtros$Brazil$biome)
 #
 # Exemplo de uso: Neotropico, isolando Cropland_A como categoria propria
-# diversity_cropland_A <- process_diversity(biodiversity, realm = realm_filtros$Neotropics,
+# diversity_cropland_A <- process_diversity(biodiversity, realm = regiao_filtros$Neotropics$realm,
 #   custom_landuse = custom_landuse_list$cropland_A)
 #
 # Para rodar todas as combinacoes de uma vez, ver R/RMM-C3.R
