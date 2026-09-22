@@ -1,6 +1,6 @@
 ###### Este script foi elaborado por Daniel Maurenza ######
 # Este código foi elaborado para subsidiar  as análises descritas em outro script chamado "Run_Models_Maurenza.R"
-# Aqui são preparados as diferentes combinações de Bioma e Realms, bem como as definições de classes de uso da terra.
+# Aqui são preparados as diferentes combinações de Realm, bem como as definições de classes de uso da terra.
 # Ambos os scripts são uma adaptação do tutorial elaborado por De Palma [https://adrianadepalma.github.io/BII_tutorial/], para calcular o indice BII - Biodiversity Intactness Index
 
 # Remover todos os elementos
@@ -13,51 +13,28 @@ bio <- readRDS("Data/5b91276b-9051-4f48-9a5b-b3106730e4ae_release_2022.rds")
 biodiversity <- rbind(biodiversity, bio)
 
 
-# Biomas por regiao ----
-# Cada vetor lista os biomas (nomenclatura WWF, como aparecem em `Biome`)
-# considerados equivalentes a cada regiao do Brasil. Sao usados tanto para
-# recortar o Realm "Neotropic" quanto para montar as versoes "globais"
-# (todos os realms, restritos aos mesmos biomas da regiao).
-# Obs.: os nomes precisam usar "&" (ex.: "Tropical & Subtropical..."), que e
-# a grafia usada na coluna Biome do PREDICTS -- usar "and" no lugar de "&"
-# faz o filtro nao casar com nada.
-Bioma_NE <- c(
-  "Tropical & Subtropical Moist Broadleaf Forests",
-  "Tropical & Subtropical Dry Broadleaf Forests",
-  "Deserts & Xeric Shrublands",
-  "Tropical & Subtropical Grasslands, Savannas & Shrublands"
+# Filtros de Realm ----
+# Cada item agrupa um ou mais "Realm" (nomenclatura WWF, como aparecem em
+# `Realm`) usados nas analises. NULL = mantem todos os realms.
+#   Global      : todos os realms (sem filtro)
+#   all_tropics : todos os realms tropicais -- Neotropic (America Central e
+#                 America do Sul, incluindo o Brasil inteiro), Afrotropic
+#                 (Africa subsaariana e Madagascar), Indo-Malay (Sul e
+#                 Sudeste Asiatico tropical) e Australasia (Australia, Nova
+#                 Guine e Nova Zelandia)
+#   Neotropics  : apenas o Neotropico
+realm_filtros <- list(
+  Global = NULL,
+  all_tropics = c("Neotropic", "Afrotropic", "Indo-Malay", "Australasia"),
+  Neotropics = "Neotropic"
 )
-Bioma_CO <- c(
-  "Tropical & Subtropical Grasslands, Savannas & Shrublands",
-  "Flooded Grasslands & Savannas",
-  "Tropical & Subtropical Dry Broadleaf Forests",
-  "Tropical & Subtropical Moist Broadleaf Forests"
-)
-Bioma_SE <- c(
-  "Tropical & Subtropical Grasslands, Savannas & Shrublands",
-  "Tropical & Subtropical Moist Broadleaf Forests",
-  "Tropical & Subtropical Dry Broadleaf Forests",
-  "Deserts & Xeric Shrublands"
-)
-Bioma_N <- c(
-  "Tropical & Subtropical Grasslands, Savannas & Shrublands",
-  "Tropical & Subtropical Moist Broadleaf Forests",
-  "Tropical & Subtropical Dry Broadleaf Forests"
-)
-Bioma_S <- c(
-  "Temperate Grasslands, Savannas & Shrublands",
-  "Tropical & Subtropical Moist Broadleaf Forests",
-  "Flooded Grasslands & Savannas",
-  "Tropical & Subtropical Grasslands, Savannas & Shrublands"
-)
-# uniao de todos os biomas das regioes brasileiras (equivalente ao antigo biome_br)
-Biome_BR <- unique(c(Bioma_NE, Bioma_CO, Bioma_SE, Bioma_N, Bioma_S))
 
 # De Palma processes ----
-# Recebe os dados brutos do PREDICTS, filtra por realm e biomas de interesse
-# e aplica as regras de reclassificacao de LandUse (De Palma et al.).
-# realm = NULL mantem todos os realms (versao "global"); um vetor filtra um
-# ou mais realms especificos (ex.: "Neotropic", ou c("Neotropic", "Afrotropic")).
+# Recebe os dados brutos do PREDICTS, filtra por realm de interesse e aplica
+# as regras de reclassificacao de LandUse (De Palma et al.).
+# realm = NULL mantem todos os realms (equivalente ao filtro "Global" de
+# realm_filtros); um vetor filtra um ou mais realms especificos (ex.:
+# "Neotropic", ou c("Neotropic", "Afrotropic")) -- ver realm_filtros acima.
 #
 # custom_landuse (opcional): lista com land_use, intensity (vetor) e label,
 # para isolar uma combinacao especifica de Predominant_land_use + Use_intensity
@@ -65,15 +42,12 @@ Biome_BR <- unique(c(Bioma_NE, Bioma_CO, Bioma_SE, Bioma_N, Bioma_S))
 # linhas (que nao casarem com o filtro) mantem a classificacao padrao normalmente.
 # Ex.: list(land_use = "Cropland", intensity = c("Light use", "Intense use"),
 #           label = "Cropland_A")
-process_diversity <- function(data, realm = NULL, biome, custom_landuse = NULL) {
+process_diversity <- function(data, realm = NULL, custom_landuse = NULL) {
 
   if (!is.null(realm)) {
     data <- data |>
       dplyr::filter(Realm %in% realm)
   }
-
-  data <- data |>
-    dplyr::filter(Biome %in% biome)
 
   diversity <- data |>
     # make a level of Primary minimal. Everything else gets the coarse land use
@@ -181,15 +155,17 @@ custom_landuse_list <- list(
   )
 )
 
-# Exemplo de uso: regiao Nordeste, so dados do Neotropico, classificacao padrao
-# diversity <- process_diversity(dbbiodtotal, realm = "Neotropic", biome = Bioma_NE)
+# Exemplo de uso: todos os realms tropicais, classificacao padrao
+# diversity <- process_diversity(biodiversity, realm = realm_filtros$all_tropics)
 #
-# Exemplo de uso: regiao Nordeste, dados globais (todos os realms com os
-# mesmos biomas do Nordeste)
-# diversity <- process_diversity(dbbiodtotal, realm = NULL, biome = Bioma_NE)
+# Exemplo de uso: apenas o Neotropico
+# diversity <- process_diversity(biodiversity, realm = realm_filtros$Neotropics)
 #
-# Exemplo de uso: regiao Nordeste, isolando Cropland_A como categoria propria
-# diversity_cropland_A <- process_diversity(dbbiodtotal, realm = "Neotropic",
-#   biome = Bioma_NE, custom_landuse = custom_landuse_list$cropland_A)
+# Exemplo de uso: todos os realms (Global), sem filtro
+# diversity <- process_diversity(biodiversity, realm = realm_filtros$Global)
 #
-# Para rodar todas as combinacoes de uma vez, ver R/run_all_combinations.R
+# Exemplo de uso: Neotropico, isolando Cropland_A como categoria propria
+# diversity_cropland_A <- process_diversity(biodiversity, realm = realm_filtros$Neotropics,
+#   custom_landuse = custom_landuse_list$cropland_A)
+#
+# Para rodar todas as combinacoes de uma vez, ver R/RMM-C3.R
