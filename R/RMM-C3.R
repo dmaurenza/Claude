@@ -10,62 +10,42 @@
 # na mesma base), este script:
 #   1) roda o pipeline uma vez SEM custom_landuse (categorias padrao De Palma)
 #   2) roda o pipeline mais uma vez PARA CADA filtro de custom_landuse_list
+#      (7 rodadas)
 #   3) de cada rodada com filtro, guarda so a linha da categoria nova
 #   4) junta tudo (categorias padrao + as categorias customizadas de
 #      custom_landuse_list) numa unica tabela de resultados
-#   5) salva os modelos (ab_m e cd_m) de cada rodada em disco
-#   6) recarrega todos os modelos salvos e roda uma selecao de modelos (AIC)
-#      comparando todas as combinacoes de LandUse rodadas para essa regiao
-# ... e repete os passos 1-6 automaticamente para CADA bioma regional listado
-# em `biome_regioes` abaixo, sempre com realm = "Neotropic".
+#   5) salva os resultados (coeficientes + R2) em disco
 #
-# Pre-requisito: rodar o PDM-C3.R inteiro antes deste script, na mesma
-# sessao do R (ele define dbbiodtotal, Bioma_*, Biome_BR, process_diversity()
-# e custom_landuse_list).
+# ... e repete os passos 1-5 automaticamente para CADA filtro de regiao
+# listado em `regiao_filtros` (definido no PDM-C3_Realms.R): Global,
+# all_tropics, Neotropics, Brazil e Brazil_custom.
+#
+# Pre-requisito: rodar o PDM-C3_Realms.R inteiro antes deste script, na
+# mesma sessao do R (ele define biodiversity, regiao_filtros,
+# process_diversity() e custom_landuse_list).
 
 # ===== CONFIGURACAO DA REGIAO ==============================================
-# Este script roda sempre com realm = "Neotropic", uma vez para cada um dos
-# biomas regionais definidos no PDM-C3.R (Bioma_NE, Bioma_CO, Bioma_SE,
-# Bioma_N, Bioma_S), e mais uma vez para a uniao de todos eles (Biome_BR).
+# Este script roda uma vez para cada filtro de `regiao_filtros` (ver
+# PDM-C3_Realms.R) -- Global, all_tropics, Neotropics, Brazil e
+# Brazil_custom. Cada filtro ja carrega seu proprio `realm` e/ou `biome`,
+# entao nao ha nada para configurar aqui: para adicionar/remover uma
+# regiao, edite `regiao_filtros` no PDM-C3_Realms.R.
 #
-# `combination` (usado para nomear os arquivos de saida em Output/ e os
-# modelos em Output/Models/) e montado automaticamente como
-# "<realm_regiao>_<nome do bioma>" (ex.: "Neotropic_NE") dentro de
-# run_region() -- nao e mais digitado a mao, entao o nome do arquivo nao tem
-# como ficar dessincronizado da regiao/bioma realmente rodado.
-#
-# Para rodar outros realms (Afrotropic, Indo-Malay, Australasia, ou uma
-# combinacao deles), troque `realm_regiao` abaixo e rode o script de novo --
-# cada realm precisa da sua propria rodada manual, ja que os arquivos de
-# saida de uma rodada anterior nao sao sobrescritos (ver trava de seguranca
-# na Etapa 5, dentro de run_region()).
-realm_regiao <- "Neotropic"
-
-biome_regioes <- list(
-  NE = Bioma_NE,
-  CO = Bioma_CO,
-  SE = Bioma_SE,
-  N  = Bioma_N,
-  S  = Bioma_S,
-  BR = Biome_BR
-)
-
-# pasta onde os modelos (ab_m/cd_m) de cada rodada sao salvos (Etapa 3b) e
-# depois recarregados para a selecao de modelos por AIC (Etapa 6)
-model_dir <- "./Output/Models/"
+# `combination` (usado para nomear os arquivos de saida em Output/) e o
+# proprio nome do filtro em regiao_filtros (ex.: "Neotropics", "Brazil") --
+# montado automaticamente dentro de run_region(), nunca digitado a mao.
 output_dir <- "./Output/"
 # ============================================================================
 
 # get_bray() fica FORA/ANTES de run_bii_models() de proposito. Se ela (ou
 # qualquer funcao usada dentro do future_map2_dbl) for definida DENTRO de
-# run_bii_models(), o ambiente local dela passa a incluir o dbbiodtotal
-# inteiro (que e um parametro da funcao) -- e toda vez que essa funcao
-# precisar ser exportada para os workers paralelos do future/furrr, o
-# dbbiodtotal inteiro e serializado e enviado junto, mesmo sem nenhuma
-# necessidade. Isso causa exatamente o erro
-# "FutureError... failed to launch... worker no longer alive" com o tamanho
-# dos globals na casa dos GiB. Definindo aqui fora (ambiente global), get_bray
-# fica leve para exportar.
+# run_bii_models(), o ambiente local dela passa a incluir o biodiv inteiro
+# (que e um parametro da funcao) -- e toda vez que essa funcao precisar ser
+# exportada para os workers paralelos do future/furrr, o biodiv inteiro e
+# serializado e enviado junto, mesmo sem nenhuma necessidade. Isso causa
+# exatamente o erro "FutureError... failed to launch... worker no longer
+# alive" com o tamanho dos globals na casa dos GiB. Definindo aqui fora
+# (ambiente global), get_bray fica leve para exportar.
 get_bray <- function(s1, s2, data) {
   sp_data <- data |>
     dplyr::filter(SSBS %in% c(s1, s2)) |>
@@ -86,25 +66,13 @@ get_bray <- function(s1, s2, data) {
   bray
 }
 
-list_abundance <- list()
-list_composition <- list()
 # Etapa 1/2/3/4 encapsuladas numa funcao, para poder rodar o mesmo pipeline
 # repetidas vezes (uma por filtro) sem duplicar codigo ----
-#
-# run_label identifica a rodada (ex.: "baseline", ou o nome do filtro em
-# custom_landuse_list, como "cropland_A"). `combination` identifica a
-# regiao/bioma (ex.: "Neotropic_NE") e e recebido explicitamente como
-# parametro -- em vez de lido de uma variavel global -- para nao correr o
-# risco de salvar o modelo de uma rodada com o `combination` de outra (o
-# bug que motivou esse ajuste). Os dois juntos nomeiam os arquivos de
-# modelo salvos na Etapa 3b, e sao usados na Etapa 6 para saber de qual
-# rodada/combinacao de LandUse cada modelo recarregado veio.
-
-run_bii_models <- function(dbbiodtotal, biome, realm, combination, custom_landuse = NULL, run_label) {
+run_bii_models <- function(biodiv, realm = NULL, biome = NULL, custom_landuse = NULL) {
 
   # Etapa 1 - Builting database ----
   diversity <- process_diversity(
-    data = dbbiodtotal, biome = biome, realm = realm,
+    data = biodiv, realm = realm, biome = biome,
     custom_landuse = custom_landuse
   )
 
@@ -192,7 +160,7 @@ run_bii_models <- function(dbbiodtotal, biome, realm, combination, custom_landus
   # e data = cd_data_input passado via ... -- assim nenhuma funcao/wrapper
   # nova e criada dentro do frame de run_bii_models(), e o unico "global"
   # grande exportado para os workers e o cd_data_input em si (que ja e
-  # necessario mesmo), nao o dbbiodtotal inteiro.
+  # necessario mesmo), nao o biodiv inteiro.
   bray <- furrr::future_map2_dbl(
     .x = site_comparisons$s1,
     .y = site_comparisons$s2,
@@ -252,15 +220,6 @@ run_bii_models <- function(dbbiodtotal, biome, realm, combination, custom_landus
     logitCS ~ lu_contrast + log10geo + (1 | SS) + (1 | s2),
     data = cd_data
   )
-
-  # Etapa 3b - Saving models ----
-  # Salva ab_m e cd_m desta rodada (run_label) em disco, nomeados por
-  # combination + run_label + tipo de modelo, para poderem ser recarregados
-  # na Etapa 6 e comparados por AIC contra as demais rodadas (baseline e os
-  # outros filtros de custom_landuse_list) dessa mesma regiao/combination.
-  if (!dir.exists(model_dir)) {dir.create(model_dir, recursive = TRUE)}
-  saveRDS(ab_m, file.path(model_dir, paste0(combination, "_", run_label, "_ab_m.rds")))
-  saveRDS(cd_m, file.path(model_dir, paste0(combination, "_", run_label, "_cd_m.rds")))
 
   # R2 dos modelos (Nakagawa & Schielzeth) ----
   # R2 marginal = variancia explicada so pelos efeitos fixos (LandUse / lu_contrast)
@@ -326,29 +285,23 @@ run_bii_models <- function(dbbiodtotal, biome, realm, combination, custom_landus
 }
 
 # Roda o pipeline completo (baseline + custom_landuse_list + salvar
-# resultados/R2/modelos + selecao de modelos por AIC) para uma unica
-# combinacao realm_regiao (fixo, "Neotropic") + biome_regiao ----
-run_region <- function(nome_regiao, biome_regiao) {
+# resultados/R2) para um unico filtro de regiao (nome + realm/biome, vindos
+# de regiao_filtros) ----
+run_region <- function(nome_regiao, realm, biome) {
 
-  combination <- paste(realm_regiao, nome_regiao, sep = "_")
+  combination <- nome_regiao
   cat("\n===== Rodando combination =", combination, "=====\n")
 
-  baseline_run <- run_bii_models(
-    dbbiodtotal, biome = biome_regiao, realm = realm_regiao,
-    combination = combination, run_label = "baseline"
-  )
+  baseline_run <- run_bii_models(biodiversity, realm = realm, biome = biome)
 
   baseline_results <- baseline_run$results
   baseline_r2 <- dplyr::mutate(baseline_run$r2, filtro = "baseline (categorias padrao)", .before = 1)
 
   # purrr::imap() em vez de purrr::map(): precisamos do nome de cada filtro
-  # (cropland_A, cropland_B, ...) dentro do loop, para passar como run_label
-  # (usado para nomear os arquivos de modelo salvos na Etapa 3b)
+  # (cropland_A, cropland_B, ...) dentro do loop, para identificar a linha
+  # de cada rodada na tabela de resultados/R2 (coluna `filtro`)
   custom_runs <- purrr::imap(custom_landuse_list, function(spec, nm) {
-    run_bii_models(
-      dbbiodtotal, biome = biome_regiao, realm = realm_regiao,
-      combination = combination, custom_landuse = spec, run_label = nm
-    )
+    run_bii_models(biodiversity, realm = realm, biome = biome, custom_landuse = spec)
   })
 
   custom_results <- purrr::map2_dfr(custom_runs, custom_landuse_list, function(run, spec) {
@@ -383,66 +336,12 @@ run_region <- function(nome_regiao, biome_regiao) {
   cat("Resultado (coeficientes) salvo em:", output_path, "\n")
   cat("Resultado (R2 dos modelos) salvo em:", output_path_r2, "\n")
 
-  # Etapa 6 - Model selection (AIC) ----
-  # Recarrega TODOS os modelos salvos na Etapa 3b para esta `combination`
-  # (baseline + cada filtro de custom_landuse_list) e compara o ajuste deles
-  # por AIC. A comparacao e feita separadamente por tipo de modelo (abundancia
-  # x composicional), porque cada tipo tem variavel resposta e estrutura de
-  # efeitos aleatorios diferentes -- AIC so e comparavel entre modelos com a
-  # MESMA variavel resposta.
-  model_files <- list.files(
-    model_dir,
-    pattern = paste0("^", combination, "_.*_(ab_m|cd_m)\\.rds$"),
-    full.names = TRUE
-  )
-
-  if (length(model_files) == 0) {
-    stop(
-      "Nenhum modelo salvo encontrado em '", model_dir, "' para combination = '", combination, "'.\n",
-      "Rode a Etapa 3b (dentro de run_bii_models) antes desta etapa."
-    )
-  }
-
-  model_selection <- purrr::map_dfr(model_files, function(f) {
-    m <- readRDS(f)
-
-    # nome do arquivo: <combination>_<run_label>_<tipo>.rds (tipo = ab_m ou cd_m)
-    nm <- tools::file_path_sans_ext(basename(f))
-    nm <- sub(paste0("^", combination, "_"), "", nm)
-    tipo_modelo <- sub(".*_(ab_m|cd_m)$", "\\1", nm)
-    run_label <- sub("_(ab_m|cd_m)$", "", nm)
-
-    ll <- logLik(m)
-
-    data.frame(
-      combination = combination,
-      run_label = run_label,
-      tipo_modelo = tipo_modelo,
-      npar = attr(ll, "df"),
-      logLik = as.numeric(ll),
-      AIC = AIC(m)
-    )
-  })
-
-  # dentro de cada tipo de modelo, ordena do menor pro maior AIC e calcula o
-  # deltaAIC em relacao ao melhor modelo daquele tipo
-  model_selection <- model_selection |>
-    dplyr::group_by(tipo_modelo) |>
-    dplyr::arrange(AIC, .by_group = TRUE) |>
-    dplyr::mutate(deltaAIC = AIC - min(AIC)) |>
-    dplyr::ungroup() |>
-    dplyr::arrange(tipo_modelo, AIC)
-
-  output_path_model_selection <- paste0(output_dir, combination, "_ModelSelection.csv")
-  readr::write_csv(model_selection, output_path_model_selection)
-  cat("Selecao de modelos (AIC) salva em:", output_path_model_selection, "\n")
-  print(model_selection)
-
-  list(results = results, r2 = r2_all, model_selection = model_selection)
+  list(results = results, r2 = r2_all)
 }
 
-# Roda o pipeline completo para realm = "Neotropic", uma vez para cada bioma
-# regional listado em `biome_regioes` (bloco de configuracao no topo) ----
-regioes_results <- purrr::imap(biome_regioes, function(biome_vec, nome_regiao) {
-  run_region(nome_regiao = nome_regiao, biome_regiao = biome_vec)
+# Roda o pipeline completo para cada um dos filtros de regiao definidos em
+# regiao_filtros (PDM-C3_Realms.R): Global, all_tropics, Neotropics,
+# Brazil e Brazil_custom ----
+regioes_results <- purrr::imap(regiao_filtros, function(filtro, nome_regiao) {
+  run_region(nome_regiao = nome_regiao, realm = filtro$realm, biome = filtro$biome)
 })
