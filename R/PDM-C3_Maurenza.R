@@ -11,7 +11,8 @@ library(tidyverse)
 biodiversity <- readRDS("Data/6fa1dedf-c546-41e0-a470-17c4863686b8.rds")
 bio <- readRDS("Data/5b91276b-9051-4f48-9a5b-b3106730e4ae_release_2022.rds")
 biodiversity <- rbind(biodiversity, bio)
-
+colnames(biodiversity)
+unique(biodiversity$Biome)
 
 # Biomas do Brasil ----
 # Todos os biomas (nomenclatura WWF, como aparecem em `Biome`) que ocorrem
@@ -22,32 +23,48 @@ biomas_brasil <- biodiversity |>
   dplyr::pull(Biome) |>
   unique()
 
+# versao fixa/curada dos biomas do Brasil (uniao das antigas Bioma_NE/CO/
+# SE/N/S), para comparar contra a versao calculada acima (biomas_brasil) --
+# ter as duas ajuda a revelar se ha bioma(s) presentes nos dados brasileiros
+# do PREDICTS que essa lista manual nao cobre, ou vice-versa.
+biomas_brasil_custom <- c(
+  "Tropical & Subtropical Grasslands, Savannas & Shrublands",
+  "Tropical & Subtropical Moist Broadleaf Forests",
+  "Tropical & Subtropical Dry Broadleaf Forests",
+  "Deserts & Xeric Shrublands",
+  "Flooded Grasslands & Savannas",
+  "Temperate Grasslands, Savannas & Shrublands"
+)
+
 # Filtros de regiao ----
-# Os 4 "modelos"/regioes usados nas analises. Cada item tem um filtro de
+# Os 5 "modelos"/regioes usados nas analises. Cada item tem um filtro de
 # `realm` e/ou de `biome` (NULL = sem filtro naquele campo) a passar para
 # process_diversity() abaixo.
-#   Global      : todos os realms, todos os biomas (sem filtro)
-#   all_tropics : todos os realms tropicais -- Neotropic (America Central e
-#                 America do Sul, incluindo o Brasil inteiro), Afrotropic
-#                 (Africa subsaariana e Madagascar), Indo-Malay (Sul e
-#                 Sudeste Asiatico tropical) e Australasia (Australia, Nova
-#                 Guine e Nova Zelandia)
-#   Neotropics  : apenas o Neotropico
-#   Brazil      : sem filtro de realm -- inclui dados de QUALQUER
-#                 realm/pais, desde que o Biome seja um dos encontrados no
-#                 Brasil (biomas_brasil, acima)
+#   Global        : todos os realms, todos os biomas (sem filtro)
+#   all_tropics   : todos os realms tropicais -- Neotropic (America Central
+#                   e America do Sul, incluindo o Brasil inteiro),
+#                   Afrotropic (Africa subsaariana e Madagascar), Indo-Malay
+#                   (Sul e Sudeste Asiatico tropical) e Australasia
+#                   (Australia, Nova Guine e Nova Zelandia)
+#   Neotropics    : apenas o Neotropico
+#   Brazil        : sem filtro de realm -- inclui dados de QUALQUER
+#                   realm/pais, desde que o Biome seja um dos encontrados
+#                   no Brasil (biomas_brasil, calculado dos dados)
+#   Brazil_custom : igual ao Brazil, mas usando a lista fixa/curada de
+#                   biomas (biomas_brasil_custom) em vez da calculada
 regiao_filtros <- list(
   Global = list(realm = NULL, biome = NULL),
   all_tropics = list(realm = c("Neotropic", "Afrotropic", "Indo-Malay", "Australasia"), biome = NULL),
   Neotropics = list(realm = "Neotropic", biome = NULL),
-  Brazil = list(realm = NULL, biome = biomas_brasil)
+  Brazil = list(realm = NULL, biome = biomas_brasil),
+  Brazil_custom = list(realm = NULL, biome = biomas_brasil_custom)
 )
 
 # De Palma processes ----
 # Recebe os dados brutos do PREDICTS, filtra por realm e/ou bioma de
 # interesse e aplica as regras de reclassificacao de LandUse (De Palma et
 # al.). realm/biome = NULL mantem todos os realms/biomas -- ver
-# regiao_filtros acima para os 4 filtros usados nas analises.
+# regiao_filtros acima para os 5 filtros usados nas analises.
 #
 # custom_landuse (opcional): lista com land_use, intensity (vetor) e label,
 # para isolar uma combinacao especifica de Predominant_land_use + Use_intensity
