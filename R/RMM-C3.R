@@ -15,8 +15,9 @@
 #   4) junta tudo (categorias padrao + as categorias customizadas de
 #      custom_landuse_list) numa unica tabela de resultados
 #   5) salva os resultados (coeficientes + R2) em disco
+#   6) salva os modelos (ab_m e cd_m) de cada rodada em disco
 #
-# ... e repete os passos 1-5 automaticamente para CADA filtro de regiao
+# ... e repete os passos 1-6 automaticamente para CADA filtro de regiao
 # listado em `regiao_filtros` (definido no PDM-C3_Realms.R): Global,
 # all_tropics, Neotropics, Brazil e Brazil_custom.
 #
@@ -31,10 +32,13 @@
 # entao nao ha nada para configurar aqui: para adicionar/remover uma
 # regiao, edite `regiao_filtros` no PDM-C3_Realms.R.
 #
-# `combination` (usado para nomear os arquivos de saida em Output/) e o
-# proprio nome do filtro em regiao_filtros (ex.: "Neotropics", "Brazil") --
-# montado automaticamente dentro de run_region(), nunca digitado a mao.
+# `combination` (usado para nomear os arquivos de saida em Output/ e os
+# modelos em Output/Models/) e o proprio nome do filtro em regiao_filtros
+# (ex.: "Neotropics", "Brazil") -- montado automaticamente dentro de
+# run_region(), nunca digitado a mao.
 output_dir <- "./Output/"
+# pasta onde os modelos (ab_m/cd_m) de cada rodada sao salvos (Etapa 3b)
+model_dir <- "./Output/Models/"
 # ============================================================================
 
 # get_bray() fica FORA/ANTES de run_bii_models() de proposito. Se ela (ou
@@ -68,7 +72,16 @@ get_bray <- function(s1, s2, data) {
 
 # Etapa 1/2/3/4 encapsuladas numa funcao, para poder rodar o mesmo pipeline
 # repetidas vezes (uma por filtro) sem duplicar codigo ----
-run_bii_models <- function(biodiv, realm = NULL, biome = NULL, custom_landuse = NULL) {
+#
+# combination identifica a regiao (ex.: "Neotropics", "Brazil_custom") e
+# run_label identifica a rodada dentro dela (ex.: "baseline", ou o nome do
+# filtro em custom_landuse_list, como "cropland_A") -- os dois juntos
+# nomeiam os arquivos de modelo salvos na Etapa 3b. Sao recebidos
+# explicitamente como parametros, em vez de lidos de uma variavel global,
+# para nao correr o risco de salvar o modelo de uma rodada com o
+# combination/run_label de outra.
+run_bii_models <- function(biodiv, realm = NULL, biome = NULL, custom_landuse = NULL,
+                            combination, run_label) {
 
   # Etapa 1 - Builting database ----
   diversity <- process_diversity(
@@ -221,6 +234,14 @@ run_bii_models <- function(biodiv, realm = NULL, biome = NULL, custom_landuse = 
     data = cd_data
   )
 
+  # Etapa 3b - Saving models ----
+  # Salva ab_m e cd_m desta rodada (run_label) em disco, nomeados por
+  # combination + run_label + tipo de modelo (ex.:
+  # "Brazil_custom_cropland_A_ab_m.rds").
+  if (!dir.exists(model_dir)) {dir.create(model_dir, recursive = TRUE)}
+  saveRDS(ab_m, file.path(model_dir, paste0(combination, "_", run_label, "_ab_m.rds")))
+  saveRDS(cd_m, file.path(model_dir, paste0(combination, "_", run_label, "_cd_m.rds")))
+
   # R2 dos modelos (Nakagawa & Schielzeth) ----
   # R2 marginal = variancia explicada so pelos efeitos fixos (LandUse / lu_contrast)
   # R2 condicional = variancia explicada por efeitos fixos + aleatorios (SS, SSB, s2)
@@ -285,23 +306,31 @@ run_bii_models <- function(biodiv, realm = NULL, biome = NULL, custom_landuse = 
 }
 
 # Roda o pipeline completo (baseline + custom_landuse_list + salvar
-# resultados/R2) para um unico filtro de regiao (nome + realm/biome, vindos
-# de regiao_filtros) ----
+# resultados/R2/modelos) para um unico filtro de regiao (nome + realm/biome,
+# vindos de regiao_filtros) ----
 run_region <- function(nome_regiao, realm, biome) {
 
   combination <- nome_regiao
   cat("\n===== Rodando combination =", combination, "=====\n")
 
-  baseline_run <- run_bii_models(biodiversity, realm = realm, biome = biome)
+  baseline_run <- run_bii_models(
+    biodiversity, realm = realm, biome = biome,
+    combination = combination, run_label = "baseline"
+  )
 
   baseline_results <- baseline_run$results
   baseline_r2 <- dplyr::mutate(baseline_run$r2, filtro = "baseline (categorias padrao)", .before = 1)
 
   # purrr::imap() em vez de purrr::map(): precisamos do nome de cada filtro
   # (cropland_A, cropland_B, ...) dentro do loop, para identificar a linha
-  # de cada rodada na tabela de resultados/R2 (coluna `filtro`)
+  # de cada rodada na tabela de resultados/R2 (coluna `filtro`) e para
+  # passar como run_label (usado para nomear os arquivos de modelo salvos
+  # na Etapa 3b)
   custom_runs <- purrr::imap(custom_landuse_list, function(spec, nm) {
-    run_bii_models(biodiversity, realm = realm, biome = biome, custom_landuse = spec)
+    run_bii_models(
+      biodiversity, realm = realm, biome = biome, custom_landuse = spec,
+      combination = combination, run_label = nm
+    )
   })
 
   custom_results <- purrr::map2_dfr(custom_runs, custom_landuse_list, function(run, spec) {
@@ -335,6 +364,7 @@ run_region <- function(nome_regiao, realm, biome) {
   readr::write_csv(r2_all, output_path_r2)
   cat("Resultado (coeficientes) salvo em:", output_path, "\n")
   cat("Resultado (R2 dos modelos) salvo em:", output_path_r2, "\n")
+  cat("Modelos (ab_m/cd_m) salvos em:", model_dir, "\n")
 
   list(results = results, r2 = r2_all)
 }
