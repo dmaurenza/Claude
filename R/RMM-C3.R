@@ -19,7 +19,7 @@
 #
 # ... e repete os passos 1-6 automaticamente para CADA filtro de regiao
 # listado em `regiao_filtros` (definido no PDM-C3_Realms.R): Global,
-# all_tropics, Neotropics e Brazil_custom.
+# all_tropics e Neotropics.
 #
 # Pre-requisito: rodar o PDM-C3_Realms.R inteiro antes deste script, na
 # mesma sessao do R (ele define biodiversity, regiao_filtros,
@@ -27,14 +27,14 @@
 
 # ===== CONFIGURACAO DA REGIAO ==============================================
 # Este script roda uma vez para cada filtro de `regiao_filtros` (ver
-# PDM-C3_Realms.R) -- Global, all_tropics, Neotropics e Brazil_custom.
-# Cada filtro ja carrega seu proprio `realm` e/ou `biome`, entao nao ha
-# nada para configurar aqui: para adicionar/remover uma regiao, edite
+# PDM-C3_Realms.R) -- Global, all_tropics e Neotropics. Cada filtro ja
+# carrega seu proprio `realm` e/ou `biome`, entao nao ha nada para
+# configurar aqui: para adicionar/remover uma regiao, edite
 # `regiao_filtros` no PDM-C3_Realms.R.
 #
 # `combination` (usado para nomear os arquivos de saida em Output/ e os
 # modelos em Output/Models/) e o proprio nome do filtro em regiao_filtros
-# (ex.: "Neotropics", "Brazil_custom") -- montado automaticamente dentro de
+# (ex.: "Neotropics", "all_tropics") -- montado automaticamente dentro de
 # run_region(), nunca digitado a mao.
 output_dir <- "./Output/"
 # pasta onde os modelos (ab_m/cd_m) de cada rodada sao salvos (Etapa 3b)
@@ -73,7 +73,7 @@ get_bray <- function(s1, s2, data) {
 # Etapa 1/2/3/4 encapsuladas numa funcao, para poder rodar o mesmo pipeline
 # repetidas vezes (uma por filtro) sem duplicar codigo ----
 #
-# combination identifica a regiao (ex.: "Neotropics", "Brazil_custom") e
+# combination identifica a regiao (ex.: "Neotropics", "all_tropics") e
 # run_label identifica a rodada dentro dela (ex.: "baseline", ou o nome do
 # filtro em custom_landuse_list, como "cropland_A") -- os dois juntos
 # nomeiam os arquivos de modelo salvos na Etapa 3b. Sao recebidos
@@ -237,7 +237,7 @@ run_bii_models <- function(biodiv, realm = NULL, biome = NULL, custom_landuse = 
   # Etapa 3b - Saving models ----
   # Salva ab_m e cd_m desta rodada (run_label) em disco, nomeados por
   # combination + run_label + tipo de modelo (ex.:
-  # "Brazil_custom_cropland_A_ab_m.rds").
+  # "Neotropics_cropland_A_ab_m.rds").
   if (!dir.exists(model_dir)) {dir.create(model_dir, recursive = TRUE)}
   saveRDS(ab_m, file.path(model_dir, paste0(combination, "_", run_label, "_ab_m.rds")))
   saveRDS(cd_m, file.path(model_dir, paste0(combination, "_", run_label, "_cd_m.rds")))
@@ -370,8 +370,7 @@ run_region <- function(nome_regiao, realm, biome) {
 }
 
 # Roda o pipeline completo para cada um dos filtros de regiao definidos em
-# regiao_filtros (PDM-C3_Realms.R): Global, all_tropics, Neotropics e
-# Brazil_custom ----
+# regiao_filtros (PDM-C3_Realms.R): Global, all_tropics e Neotropics ----
 regioes_results <- purrr::imap(regiao_filtros, function(filtro, nome_regiao) {
   run_region(nome_regiao = nome_regiao, realm = filtro$realm, biome = filtro$biome)
 })
