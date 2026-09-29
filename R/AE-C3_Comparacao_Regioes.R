@@ -5,18 +5,18 @@
 # reler os dados brutos nem reajustar os 80 modelos.
 #
 # OBJETIVO: decidir se vale a pena restringir a analise a um escopo de
-# regiao mais local (Neotropics, Brazil, Brazil_custom) ou se o escopo
+# regiao mais local (Neotropics, Brazil_custom) ou se o escopo
 # Global/all_tropics ja representa bem o padrao.
 #
-# Por que NAO usar R2 para essa decisao: os 5 escopos (Global, all_tropics,
-# Neotropics, Brazil, Brazil_custom) sao ajustados sobre bases de dados
+# Por que NAO usar R2 para essa decisao: os 4 escopos (Global, all_tropics,
+# Neotropics, Brazil_custom) sao ajustados sobre bases de dados
 # DIFERENTES (N e heterogeneidade diferentes) -- R2 mais alto num
 # subconjunto menor nao significa modelo melhor, so que sobrou menos
 # variancia residual naquele recorte. Em vez disso, este script compara a
 # ESTIMATIVA do efeito de cada categoria de LandUse (na escala da variavel
 # resposta: abundancia relativa reescalada para ab_m, similaridade
-# composicional para cd_m) e seu INTERVALO DE CONFIANCA entre os 5 escopos.
-# Se as estimativas de Neotropics/Brazil forem parecidas entre si mas
+# composicional para cd_m) e seu INTERVALO DE CONFIANCA entre os 4 escopos.
+# Se as estimativas de Neotropics/Brazil_custom forem parecidas entre si mas
 # diferentes de Global, isso e evidencia de que restringir o escopo importa;
 # se forem parecidas com Global, restringir so custa poder estatistico
 # (amostras menores, IC mais largos).
@@ -40,7 +40,7 @@ conf_level <- 0.95
 # Usados so para interpretar os nomes dos arquivos de modelo salvos
 # (<combination>_<run_label>_{ab_m,cd_m}.rds) de forma robusta, sem
 # precisar re-executar o PDM-C3_Realms.R so para isso.
-combinations <- c("Global", "all_tropics", "Neotropics", "Brazil", "Brazil_custom")
+combinations <- c("Global", "all_tropics", "Neotropics", "Brazil_custom")
 run_labels <- c(
   "baseline", "cropland_A", "cropland_B", "plantation_A", "plantation_B",
   "plantation_C", "pasture_A", "natural_vegetation_A"
@@ -70,8 +70,9 @@ if (length(model_files) == 0) {
 # `combinations`/`run_labels` acima, em vez de so cortar por "_" -- varios
 # desses nomes (all_tropics, Brazil_custom, natural_vegetation_A, ...) tem
 # underscore dentro do proprio nome, entao cortar ingenuamente quebraria.
-# Usa o prefixo de combination mais LONGO que casar, para nao confundir
-# "Brazil" com "Brazil_custom" (um e prefixo do outro).
+# Usa o prefixo de combination mais LONGO que casar -- protege contra o
+# caso de um nome de combination ser prefixo de outro (ex.: se um dia
+# voltar a existir um filtro "Brazil" ao lado de "Brazil_custom").
 parse_model_filename <- function(f) {
   nm <- tools::file_path_sans_ext(basename(f))
   tipo_modelo <- sub(".*_(ab_m|cd_m)$", "\\1", nm)
@@ -252,7 +253,7 @@ cat("Grafico comparativo (baseline) salvo em:", output_path_plot, "\n")
 
 cat(
   "\nComo interpretar:\n",
-  "- Compare, para cada LandUse, se o ponto/IC de Neotropics/Brazil/Brazil_custom\n",
+  "- Compare, para cada LandUse, se o ponto/IC de Neotropics/Brazil_custom\n",
   "  fica proximo do de Global/all_tropics ou se desloca de forma consistente.\n",
   "- IC muito largo costuma coincidir com n_sitios_abundancia/n_comparacoes_composicional\n",
   "  baixos (colunas na tabela salva) -- desconfie da estimativa nesses casos,\n",

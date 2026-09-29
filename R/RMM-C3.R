@@ -19,7 +19,7 @@
 #
 # ... e repete os passos 1-6 automaticamente para CADA filtro de regiao
 # listado em `regiao_filtros` (definido no PDM-C3_Realms.R): Global,
-# all_tropics, Neotropics, Brazil e Brazil_custom.
+# all_tropics, Neotropics e Brazil_custom.
 #
 # Pre-requisito: rodar o PDM-C3_Realms.R inteiro antes deste script, na
 # mesma sessao do R (ele define biodiversity, regiao_filtros,
@@ -27,14 +27,14 @@
 
 # ===== CONFIGURACAO DA REGIAO ==============================================
 # Este script roda uma vez para cada filtro de `regiao_filtros` (ver
-# PDM-C3_Realms.R) -- Global, all_tropics, Neotropics, Brazil e
-# Brazil_custom. Cada filtro ja carrega seu proprio `realm` e/ou `biome`,
-# entao nao ha nada para configurar aqui: para adicionar/remover uma
-# regiao, edite `regiao_filtros` no PDM-C3_Realms.R.
+# PDM-C3_Realms.R) -- Global, all_tropics, Neotropics e Brazil_custom.
+# Cada filtro ja carrega seu proprio `realm` e/ou `biome`, entao nao ha
+# nada para configurar aqui: para adicionar/remover uma regiao, edite
+# `regiao_filtros` no PDM-C3_Realms.R.
 #
 # `combination` (usado para nomear os arquivos de saida em Output/ e os
 # modelos em Output/Models/) e o proprio nome do filtro em regiao_filtros
-# (ex.: "Neotropics", "Brazil") -- montado automaticamente dentro de
+# (ex.: "Neotropics", "Brazil_custom") -- montado automaticamente dentro de
 # run_region(), nunca digitado a mao.
 output_dir <- "./Output/"
 # pasta onde os modelos (ab_m/cd_m) de cada rodada sao salvos (Etapa 3b)
@@ -370,8 +370,8 @@ run_region <- function(nome_regiao, realm, biome) {
 }
 
 # Roda o pipeline completo para cada um dos filtros de regiao definidos em
-# regiao_filtros (PDM-C3_Realms.R): Global, all_tropics, Neotropics,
-# Brazil e Brazil_custom ----
+# regiao_filtros (PDM-C3_Realms.R): Global, all_tropics, Neotropics e
+# Brazil_custom ----
 regioes_results <- purrr::imap(regiao_filtros, function(filtro, nome_regiao) {
   run_region(nome_regiao = nome_regiao, realm = filtro$realm, biome = filtro$biome)
 })
