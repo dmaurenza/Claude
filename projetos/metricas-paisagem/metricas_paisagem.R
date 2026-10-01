@@ -6,8 +6,9 @@ dir_output <- "./Results"
 sites <- st_read("./Results/Sites.gpkg")
 colnames(sites)
 
-sites <- sites %>% 
-  dplyr::select(datasetId, siteId, yearStart)
+sites <- sites %>%
+  dplyr::select(datasetId, siteId, yearStart) %>%
+  mutate(id_unique = row_number()) # unique key of each site; links the metrics back to datasetId and siteId (Step 5)
 
 ## Step 1 - Creating landscapes at different sizes ----
 
@@ -44,12 +45,81 @@ library(terra) # version 1.9-27
 #source("Codes/Mapbiomas_maps.R")
 # Loading and naming mapbiomas rasters
 mapbiomas <- list.files("./Data/TIFF/", full.names = T, pattern = "brasil")
-mapbiomas.final <- lapply(mapbiomas, rast)
 
-names(mapbiomas.final) <- unique(sites$yearStart) %>% sort()
+# Year taken from each file name (last group of 4 digits), not from the file order
+mapbiomas.years <- str_extract(basename(mapbiomas), "(?<!\\d)\\d{4}(?=\\D*$)")
+
+if(any(is.na(mapbiomas.years))) stop("Year not found in file name: ", paste(basename(mapbiomas)[is.na(mapbiomas.years)], collapse = ", "))
+if(any(duplicated(mapbiomas.years))) stop("More than one raster for year: ", paste(unique(mapbiomas.years[duplicated(mapbiomas.years)]), collapse = ", "))
+missing.years <- setdiff(as.character(unique(sites$yearStart)), mapbiomas.years)
+if(length(missing.years) > 0) stop("No raster for year: ", paste(missing.years, collapse = ", "))
+
+mapbiomas.final <- lapply(mapbiomas, rast)
+names(mapbiomas.final) <- mapbiomas.years
 
 ## Step 3 -  Function to extract landscape metrics  ----
-extract_lsm <- function(buflist, rclmatrix, rstack, metrics){
+
+# Area (ha) and enn (m) of the patch located at the buffer center.
+# The patch is taken complete, including the part outside the buffer: the
+# search window around the center doubles until the patch no longer touches
+# its edge, up to max_window (m). If it still touches, truncated = 1.
+# enn: shortest distance (cell center to cell center) between the complete
+# center patch and another patch of the same class inside the buffer.
+center_patch_metrics <- function(rast_year, center, buffer_albers, rclmatrix, buf_dist, max_window){
+  
+  window <- 2 * buf_dist
+  c.xy <- st_coordinates(center)
+  
+  repeat{
+    circle <- st_buffer(center, dist = window)
+    
+    land <- terra::crop(rast_year, terra::vect(st_transform(circle, crs = wgs84))) %>% 
+      terra::project(Albers, method = "near") %>% 
+      terra::classify(rcl = rclmatrix) %>% 
+      terra::mask(terra::vect(circle))
+    
+    class.center <- terra::extract(land, terra::vect(center))[1, 2]
+    if(is.na(class.center)) return(NULL)
+    
+    # patches of the center class (8 neighbours, as in landscapemetrics)
+    patches.cls <- terra::ifel(land == class.center, 1, NA) %>% 
+      terra::patches(directions = 8)
+    id.center <- terra::extract(patches.cls, terra::vect(center))[1, 2]
+    patch.center <- terra::ifel(patches.cls == id.center, 1, NA)
+    
+    # does the patch reach the edge of the window?
+    xy <- terra::crds(patch.center, na.rm = TRUE)
+    dist.max <- max(sqrt((xy[, 1] - c.xy[1])^2 + (xy[, 2] - c.xy[2])^2))
+    truncated <- dist.max >= window - 2 * max(terra::res(land))
+    
+    if(!truncated || window >= max_window) break
+    window <- min(window * 2, max_window)
+  }
+  
+  # area of the complete patch (ha)
+  area <- nrow(xy) * prod(terra::res(land)) / 10000
+  
+  # cells of the same class, inside the buffer, that are not part of the center patch
+  neighbours <- terra::ifel(is.na(patch.center) & land == class.center, 1, NA) %>% 
+    terra::mask(terra::vect(buffer_albers))
+  
+  # a neighbour inside the buffer is at most buf_dist from the center, so its
+  # nearest center-patch cell is at most 2 * buf_dist from the center
+  zone <- terra::vect(st_buffer(center, dist = 2 * buf_dist))
+  nb <- terra::values(terra::crop(neighbours, zone))[, 1]
+  
+  enn <- NA_real_
+  if(any(!is.na(nb))){
+    dist.patch <- terra::distance(terra::crop(patch.center, zone)) # distance of each cell to the center patch
+    enn <- min(terra::values(dist.patch)[!is.na(nb), 1])
+  }
+  
+  tibble(level = "patch", class = class.center, id = id.center,
+         metric = c("area", "enn", "truncated"),
+         value = c(area, enn, as.numeric(truncated)))
+}
+
+extract_lsm <- function(buflist, rclmatrix, rstack, metrics, buf_dist = 2000, max_window = 32000){
   #list of buffers
   final.2k <- list()
   
@@ -59,6 +129,11 @@ extract_lsm <- function(buflist, rclmatrix, rstack, metrics){
   # List of metrics
   metrics.2k <- list()
   
+  # class metrics (lsm_c_*): whole buffer
+  # patch metrics (lsm_p_*): only the complete patch at the buffer center
+  metrics.c <- metrics[!grepl("^lsm_p_", metrics)]
+  metrics.p <- metrics[grepl("^lsm_p_", metrics)]
+  
   # The body of the function
   
   for(i in 1:nrow(buflist[[1]])){
@@ -66,53 +141,49 @@ extract_lsm <- function(buflist, rclmatrix, rstack, metrics){
     
     message(i)
     
-    year.i <- (as.data.frame(buflist[[1]])[i, "yearStart"]) # filter the year of raster to be used
+    buffer.i <- buflist[[1]][i,]
+    year.i <- as.character(buffer.i$yearStart) # filter the year of raster to be used
+    rast.i <- mapbiomas.final[[which(names(mapbiomas.final) == year.i)]]
     
-    final.2k[[i]] <- terra::crop(x =  mapbiomas.final[[which(names(mapbiomas.final) == year.i)]], y = buflist[[1]][i,]) %>% 
-      terra::mask(mask = buflist[[1]][i,]) # crop and mask polygon from the raster
+    final.2k[[i]] <- terra::crop(x = rast.i, y = buffer.i) %>% 
+      terra::mask(mask = buffer.i) # crop and mask polygon from the raster
     
     proj8[[i]] <- final.2k[[i]] %>% 
       terra::project(Albers, method = "near") %>% ## project to albers, and reclassify
       terra::classify(rcl = reclass_matrix )
     
     ### compute landscape metrics (for buffer 2k)
-    ### class metrics (lsm_c_*): whole buffer
-    ### patch metrics (lsm_p_*): only the patch located at the buffer center (sampling site)
-
-    metrics.c <- metrics[!grepl("^lsm_p_", metrics)]
-    metrics.p <- metrics[grepl("^lsm_p_", metrics)]
-
-    # buffer center, in the same CRS as the projected raster
-    center.i <- buflist[[1]][i,] %>%
-      st_geometry() %>%
-      st_transform(crs = Albers) %>%
-      st_centroid() %>%
-      st_coordinates()
-
+    
     lsm.c <- NULL
     lsm.p <- NULL
-
+    
     if(length(metrics.c) > 0){
       lsm.c <- calculate_lsm(landscape = proj8[[i]], what = metrics.c)
     }
-
-    # landscapemetrics:: is required: our function is also called extract_lsm
-    if(length(metrics.p) > 0){
-      lsm.p <- landscapemetrics::extract_lsm(landscape = proj8[[i]], y = center.i[, c("X", "Y"), drop = FALSE], what = metrics.p)
-
-      if(nrow(lsm.p) == 0) message("Buffer ", i, ": no patch at the center (NA cell?)")
-    }
-
-    ### save landscape metrics to a table
-
-    metrics.2k[[i]] <- bind_rows(lsm.c, lsm.p)
-    metrics.2k[[i]] <- metrics.2k[[i]] %>%
-      mutate(id_unique = buflist[[1]][i,]$id_unique)
     
-    names(metrics.2k) <- buflist[[1]][i,]$id_unique
+    if(length(metrics.p) > 0){
+      buffer.albers <- buffer.i %>% st_geometry() %>% st_transform(crs = Albers) %>% st_sf()
+      center.i <- buffer.albers %>% st_centroid() # buffer center = sampling site
+      
+      lsm.p <- center_patch_metrics(rast_year = rast.i, center = center.i, buffer_albers = buffer.albers,
+                                    rclmatrix = reclass_matrix, buf_dist = buf_dist, max_window = max_window)
+      
+      if(is.null(lsm.p)){
+        message("Buffer ", i, ": no patch at the center (NA cell)")
+      } else {
+        lsm.p <- lsm.p %>% filter(metric %in% c(sub("^lsm_p_", "", metrics.p), "truncated"))
+      }
+    }
+    
+    ### save landscape metrics to a table
+    
+    metrics.2k[[i]] <- bind_rows(lsm.c, lsm.p) %>% 
+      mutate(id_unique = buffer.i$id_unique)
     
     gc() # to clean our memory
   }
+  
+  names(metrics.2k) <- buflist[[1]]$id_unique
   
   metrics.list <- list(metrics.2k)
   names(metrics.list) <- names(buflist)
@@ -152,26 +223,35 @@ library(mapview)
 ## Step 5 - Organizing the final table ----
 ### fix tables --------------
 
-lsm2k <- sites_lsm[["2k"]]
-i = 1
-for(i in 1:length(lsm2k)){
-  lsm2k[[i]]$id_unique <- i
-}
-
-## join all data in a single table
-library(data.table)
-lsm2k <- rbindlist(lsm2k)
+## join all data in a single table (id_unique was set inside extract_lsm)
+lsm2k <- bind_rows(sites_lsm[["2k"]])
 glimpse(lsm2k)
 lsm2k
 
-lsm2k_wide <- lsm2k %>%
-  pivot_wider(
-    names_from = metric,
-    values_from = value
-  )
-  
-final_table <- lsm2k_wide %>% 
-    select(id_unique, class, ed, np, pland, area, enn)
+# site attributes, to link each id_unique to datasetId and siteId
+sites_info <- buffers.list[["2k"]] %>% 
+  st_drop_geometry() %>% 
+  dplyr::select(id_unique, datasetId, siteId, yearStart)
+
+# class metrics: one row per site and class
+lsm2k_class <- lsm2k %>% 
+  filter(level == "class") %>% 
+  dplyr::select(id_unique, class, metric, value) %>% 
+  pivot_wider(names_from = metric, values_from = value)
+
+# patch metrics: one row per site (class of the center patch)
+lsm2k_patch <- lsm2k %>% 
+  filter(level == "patch") %>% 
+  dplyr::select(id_unique, class, metric, value) %>% 
+  pivot_wider(names_from = metric, values_from = value)
+
+# area, enn and truncated appear only in the row of the center patch class
+final_table <- lsm2k_class %>% 
+  full_join(lsm2k_patch, by = c("id_unique", "class")) %>% 
+  left_join(sites_info, by = "id_unique") %>% 
+  dplyr::select(id_unique, datasetId, siteId, yearStart, class,
+                any_of(c("ed", "np", "pland", "area", "enn", "truncated"))) %>% 
+  arrange(id_unique, class)
   
 # Saving Final table ----
 
