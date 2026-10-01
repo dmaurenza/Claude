@@ -76,10 +76,37 @@ extract_lsm <- function(buflist, rclmatrix, rstack, metrics){
       terra::classify(rcl = reclass_matrix )
     
     ### compute landscape metrics (for buffer 2k)
+    ### class metrics (lsm_c_*): whole buffer
+    ### patch metrics (lsm_p_*): only the patch located at the buffer center (sampling site)
+
+    metrics.c <- metrics[!grepl("^lsm_p_", metrics)]
+    metrics.p <- metrics[grepl("^lsm_p_", metrics)]
+
+    # buffer center, in the same CRS as the projected raster
+    center.i <- buflist[[1]][i,] %>%
+      st_geometry() %>%
+      st_transform(crs = Albers) %>%
+      st_centroid() %>%
+      st_coordinates()
+
+    lsm.c <- NULL
+    lsm.p <- NULL
+
+    if(length(metrics.c) > 0){
+      lsm.c <- calculate_lsm(landscape = proj8[[i]], what = metrics.c)
+    }
+
+    # landscapemetrics:: is required: our function is also called extract_lsm
+    if(length(metrics.p) > 0){
+      lsm.p <- landscapemetrics::extract_lsm(landscape = proj8[[i]], y = center.i[, c("X", "Y"), drop = FALSE], what = metrics.p)
+
+      if(nrow(lsm.p) == 0) message("Buffer ", i, ": no patch at the center (NA cell?)")
+    }
+
     ### save landscape metrics to a table
-    
-    metrics.2k[[i]] <- calculate_lsm(landscape = proj8[[i]], what = metrics)
-    metrics.2k[[i]] <- metrics.2k[[i]] %>% 
+
+    metrics.2k[[i]] <- bind_rows(lsm.c, lsm.p)
+    metrics.2k[[i]] <- metrics.2k[[i]] %>%
       mutate(id_unique = buflist[[1]][i,]$id_unique)
     
     names(metrics.2k) <- buflist[[1]][i,]$id_unique
