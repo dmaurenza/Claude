@@ -60,12 +60,15 @@ names(mapbiomas.final) <- mapbiomas.years
 ## Step 3 -  Function to extract landscape metrics  ----
 
 # Area (ha) and enn (m) of the patch located at the buffer center.
-# The patch is taken complete, including the part outside the buffer: the
-# search window around the center doubles until the patch no longer touches
-# its edge, up to max_window (m). If it still touches, truncated = 1.
+# The patch is taken complete, including the part outside the buffer.
 # enn: shortest distance (cell center to cell center) between the complete
-# center patch and another patch of the same class inside the buffer.
-center_patch_metrics <- function(rast_year, center, buffer_albers, rclmatrix, buf_dist, max_window){
+# center patch and the nearest patch of the same class, inside or outside
+# the buffer.
+# The search window around the center doubles until (1) the center patch no
+# longer touches its edge and (2) no closer patch could lie outside it, up to
+# max_window (m). If a condition still fails at max_window, the matching flag
+# (area_truncated or enn_truncated) is 1.
+center_patch_metrics <- function(rast_year, center, rclmatrix, buf_dist, max_window){
   
   window <- 2 * buf_dist
   c.xy <- st_coordinates(center)
@@ -87,36 +90,43 @@ center_patch_metrics <- function(rast_year, center, buffer_albers, rclmatrix, bu
     id.center <- terra::extract(patches.cls, terra::vect(center))[1, 2]
     patch.center <- terra::ifel(patches.cls == id.center, 1, NA)
     
+    # cells beyond this distance from the center may be cut by the window edge
+    limit <- window - 2 * max(terra::res(land))
+    
     # does the patch reach the edge of the window?
     xy <- terra::crds(patch.center, na.rm = TRUE)
     dist.max <- max(sqrt((xy[, 1] - c.xy[1])^2 + (xy[, 2] - c.xy[2])^2))
-    truncated <- dist.max >= window - 2 * max(terra::res(land))
+    area.truncated <- dist.max >= limit
     
-    if(!truncated || window >= max_window) break
+    enn <- NA_real_
+    enn.truncated <- TRUE
+    
+    if(!area.truncated){
+      # cells of the same class that are not part of the center patch (whole window)
+      nb <- terra::ifel(is.na(patch.center) & land == class.center, 1, NA) %>% 
+        terra::values()
+      nb <- nb[, 1]
+      
+      if(any(!is.na(nb))){
+        dist.patch <- terra::distance(patch.center) # distance of each cell to the center patch
+        enn <- min(terra::values(dist.patch)[!is.na(nb), 1])
+        
+        # a closer patch would be at most dist.max + enn from the center;
+        # if that is inside the window, it would have been found
+        enn.truncated <- dist.max + enn >= limit
+      }
+    }
+    
+    if((!area.truncated && !enn.truncated) || window >= max_window) break
     window <- min(window * 2, max_window)
   }
   
   # area of the complete patch (ha)
   area <- nrow(xy) * prod(terra::res(land)) / 10000
   
-  # cells of the same class, inside the buffer, that are not part of the center patch
-  neighbours <- terra::ifel(is.na(patch.center) & land == class.center, 1, NA) %>% 
-    terra::mask(terra::vect(buffer_albers))
-  
-  # a neighbour inside the buffer is at most buf_dist from the center, so its
-  # nearest center-patch cell is at most 2 * buf_dist from the center
-  zone <- terra::vect(st_buffer(center, dist = 2 * buf_dist))
-  nb <- terra::values(terra::crop(neighbours, zone))[, 1]
-  
-  enn <- NA_real_
-  if(any(!is.na(nb))){
-    dist.patch <- terra::distance(terra::crop(patch.center, zone)) # distance of each cell to the center patch
-    enn <- min(terra::values(dist.patch)[!is.na(nb), 1])
-  }
-  
   tibble(level = "patch", class = class.center, id = id.center,
-         metric = c("area", "enn", "truncated"),
-         value = c(area, enn, as.numeric(truncated)))
+         metric = c("area", "enn", "area_truncated", "enn_truncated"),
+         value = c(area, enn, as.numeric(area.truncated), as.numeric(enn.truncated)))
 }
 
 extract_lsm <- function(buflist, rclmatrix, rstack, metrics, buf_dist = 2000, max_window = 32000){
@@ -162,16 +172,17 @@ extract_lsm <- function(buflist, rclmatrix, rstack, metrics, buf_dist = 2000, ma
     }
     
     if(length(metrics.p) > 0){
-      buffer.albers <- buffer.i %>% st_geometry() %>% st_transform(crs = Albers) %>% st_sf()
-      center.i <- buffer.albers %>% st_centroid() # buffer center = sampling site
+      center.i <- buffer.i %>% st_geometry() %>% st_transform(crs = Albers) %>% st_sf() %>% 
+        st_centroid() # buffer center = sampling site
       
-      lsm.p <- center_patch_metrics(rast_year = rast.i, center = center.i, buffer_albers = buffer.albers,
-                                    rclmatrix = reclass_matrix, buf_dist = buf_dist, max_window = max_window)
+      lsm.p <- center_patch_metrics(rast_year = rast.i, center = center.i, rclmatrix = reclass_matrix,
+                                    buf_dist = buf_dist, max_window = max_window)
       
       if(is.null(lsm.p)){
         message("Buffer ", i, ": no patch at the center (NA cell)")
       } else {
-        lsm.p <- lsm.p %>% filter(metric %in% c(sub("^lsm_p_", "", metrics.p), "truncated"))
+        m.p <- sub("^lsm_p_", "", metrics.p)
+        lsm.p <- lsm.p %>% filter(metric %in% c(m.p, paste0(m.p, "_truncated")))
       }
     }
     
@@ -245,12 +256,12 @@ lsm2k_patch <- lsm2k %>%
   dplyr::select(id_unique, class, metric, value) %>% 
   pivot_wider(names_from = metric, values_from = value)
 
-# area, enn and truncated appear only in the row of the center patch class
+# area, enn and the truncated flags appear only in the row of the center patch class
 final_table <- lsm2k_class %>% 
   full_join(lsm2k_patch, by = c("id_unique", "class")) %>% 
   left_join(sites_info, by = "id_unique") %>% 
   dplyr::select(id_unique, datasetId, siteId, yearStart, class,
-                any_of(c("ed", "np", "pland", "area", "enn", "truncated"))) %>% 
+                any_of(c("ed", "np", "pland", "area", "enn", "area_truncated", "enn_truncated"))) %>% 
   arrange(id_unique, class)
   
 # Saving Final table ----
