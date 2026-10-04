@@ -100,7 +100,7 @@ panel_sites <- c(list(sites_all),
                  map(groups, function(g) filter(sites_group, taxonGroup == g)))
 
 # check: number of sites in each panel (should differ between groups)
-tibble(panel = panel_titles, n_points = map_int(panel_sites, nrow))
+print(tibble(panel = panel_titles, n_points = map_int(panel_sites, nrow)))
 
 # CHANGED: panels a-g plus one space for the legend shared by all panels
 # (4 columns x 2 rows; the legend fills the space after the last map)
