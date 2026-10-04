@@ -132,9 +132,42 @@ fig4 <- composition %>%
   labs(x = "Forest cover (%)", y = NULL, title = "Forest fragmentation along the gradient")
 fig4
 
+### Fig 5 - Size of the forest fragment at the buffer center ----
+# area = only the patch at the buffer center (one per site), measured inside the buffer.
+# truncated = 1: the patch reaches the buffer edge, so its area is a minimum value.
+
+buffer_area <- pi * 2000^2 / 10000 # area of the 2 km buffer (ha)
+
+forest_patch <- lsm %>%
+  filter(class == 1, !is.na(area)) %>%
+  left_join(forest, by = "id_unique") %>%
+  mutate(patch_status = factor(truncated, levels = c(0, 1),
+                               labels = c("Complete (inside the buffer)",
+                                          "Reaches the buffer edge (minimum area)")))
+
+# summary of fragment size
+forest_patch %>%
+  group_by(patch_status) %>%
+  summarise(n_sites = n(), min = min(area), median = median(area), max = max(area))
+
+fig5 <- forest_patch %>%
+  ggplot(aes(x = forest_cover, y = area, color = patch_status, shape = patch_status)) +
+  geom_hline(yintercept = buffer_area, linetype = "dashed", color = "grey50") +
+  annotate("text", x = 0, y = buffer_area * 1.25, label = "Buffer area (1,257 ha)",
+           hjust = 0, size = 3, color = "grey30") +
+  geom_point(alpha = 0.5, size = 1.6) +
+  scale_y_log10(labels = scales::label_number(big.mark = ",")) +
+  scale_color_manual(values = c("#2a78d6", "#eb6834")) +
+  scale_shape_manual(values = c(16, 1)) +
+  labs(x = "Forest cover in the 2 km buffer (%)", y = "Fragment area (ha, log scale)",
+       title = "Size of the forest fragment at the sampling site",
+       subtitle = paste0(nrow(forest_patch), " sites where the buffer center falls in forest"))
+fig5
+
 ## Step 5 - Saving figures ----
 
 ggsave(file.path(dir_output, "Figures", "fig1_forest_gradient.png"), fig1, width = 7, height = 4.5, dpi = 300, bg = "white")
 ggsave(file.path(dir_output, "Figures", "fig2_composition_profile.png"), fig2, width = 9, height = 5.5, dpi = 300, bg = "white")
 ggsave(file.path(dir_output, "Figures", "fig3_classes_gradient.png"), fig3, width = 9, height = 6, dpi = 300, bg = "white")
 ggsave(file.path(dir_output, "Figures", "fig4_forest_configuration.png"), fig4, width = 9, height = 4.5, dpi = 300, bg = "white")
+ggsave(file.path(dir_output, "Figures", "fig5_forest_fragment_area.png"), fig5, width = 8, height = 5.5, dpi = 300, bg = "white")
