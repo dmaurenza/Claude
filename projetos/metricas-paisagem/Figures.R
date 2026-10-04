@@ -182,7 +182,8 @@ sites_map <- function(points, title){
            shape = guide_legend(order = 2, override.aes = list(size = 2)),
            color = guide_legend(order = 3)) +
     labs(title = title) +
-    map_theme
+    map_theme +
+    theme(panel.grid.major = element_blank()) # CHANGED: no grid in Figure 1, only the ticks
 }
 
 fig1_panels <- map2(panel_sites, panel_titles, sites_map)
