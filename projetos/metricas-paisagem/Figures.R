@@ -246,10 +246,10 @@ kde_map <- function(kde, title){
 fig2_panels <- map2(kde_list, panel_titles, kde_map)
 fig2_panels[[1]] <- fig2_panels[[1]] + map_annotations()
 
-fig2 <- combine_panels(fig2_panels, ncol = 2) # CHANGED: 2 columns x 4 rows
+fig2 <- combine_panels(fig2_panels, ncol = 4) # CHANGED: 2 rows x 4 columns
 fig2
 
-ggsave("Fig/Fig2_Kernel_density.png", fig2, width = 8.5, height = 16, dpi = 600)
+ggsave("Fig/Fig2_Kernel_density.png", fig2, width = 13, height = 9, dpi = 600)
 
 
 rm(list = ls())
