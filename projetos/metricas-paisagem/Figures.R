@@ -103,9 +103,9 @@ panel_sites <- c(list(sites_all),
 print(tibble(panel = panel_titles, n_points = map_int(panel_sites, nrow)))
 
 # CHANGED: panels a-g plus one space for the legend shared by all panels
-# (4 columns x 2 rows; the legend fills the space after the last map)
-combine_panels <- function(panels){
-  wrap_plots(c(panels, list(guide_area())), ncol = 4) +
+# (the legend fills the space after the last map)
+combine_panels <- function(panels, ncol = 4){
+  wrap_plots(c(panels, list(guide_area())), ncol = ncol) +
     plot_layout(guides = "collect") +
     plot_annotation(tag_levels = "a", tag_suffix = ")") &
     theme(plot.tag = element_text(face = "bold", size = 11),
@@ -114,7 +114,7 @@ combine_panels <- function(panels){
           legend.box.just = "left")
 }
 
-# north arrow and scale bar (only in panel a)
+# north arrow and scale bar (Figure 1 and panel a of Figure 2)
 map_annotations <- function(){
   list(
     annotation_north_arrow(location = "tr", which_north = "true",
@@ -170,7 +170,7 @@ if(forest_now$type == "raster"){
                           aes(fill = forest_labels[2]), color = NA)
 }
 
-# one map: original extent, current remnants and the sampling sites of one panel
+# map: original extent, current remnants and sampling sites
 sites_map <- function(points, title){
   ggplot() +
     geom_sf(data = af, aes(fill = forest_labels[1]), color = NA) +
@@ -189,13 +189,13 @@ sites_map <- function(points, title){
     theme(panel.grid.major = element_blank()) # CHANGED: no grid in Figure 1, only the ticks
 }
 
-fig1_panels <- map2(panel_sites, panel_titles, sites_map)
-fig1_panels[[1]] <- fig1_panels[[1]] + map_annotations()
-
-fig1 <- combine_panels(fig1_panels)
+# CHANGED: Figure 1 is a single map with all sampling sites (not split by taxonomic group)
+fig1 <- sites_map(sites_all, title = NULL) +
+  map_annotations() +
+  theme(legend.position = "right")
 fig1
 
-ggsave("Fig/Fig1_Sampling_sites.png", fig1, width = 13, height = 9, dpi = 600)
+ggsave("Fig/Fig1_Sampling_sites.png", fig1, width = 9, height = 8, dpi = 600)
 
 # Figure 2 - Kernel density of sampling sites (same layout as Figure 1) ----
 
@@ -246,10 +246,10 @@ kde_map <- function(kde, title){
 fig2_panels <- map2(kde_list, panel_titles, kde_map)
 fig2_panels[[1]] <- fig2_panels[[1]] + map_annotations()
 
-fig2 <- combine_panels(fig2_panels)
+fig2 <- combine_panels(fig2_panels, ncol = 2) # CHANGED: 2 columns x 4 rows
 fig2
 
-ggsave("Fig/Fig2_Kernel_density.png", fig2, width = 13, height = 9, dpi = 600)
+ggsave("Fig/Fig2_Kernel_density.png", fig2, width = 8.5, height = 16, dpi = 600)
 
 
 rm(list = ls())
