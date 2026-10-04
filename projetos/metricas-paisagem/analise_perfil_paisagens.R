@@ -120,16 +120,32 @@ fig3 <- composition %>%
        title = "Land use classes along the forest cover gradient")
 fig3
 
-### Fig 4 - Forest configuration along the gradient (edge density and number of patches) ----
-fig4 <- composition %>%
-  filter(class_name == "Forest") %>%
-  select(id_unique, forest_cover, `Edge density (m/ha)` = ed, `Number of forest patches` = np) %>%
-  pivot_longer(-c(id_unique, forest_cover)) %>%
-  ggplot(aes(x = forest_cover, y = value)) +
+### Fig 4 - Forest configuration along the gradient (A: edge density, B: number of patches) ----
+library(patchwork) # install.packages("patchwork")
+
+forest_config <- composition %>%
+  filter(class_name == "Forest")
+
+# same y axis limits in A and B
+y_max <- max(c(forest_config$ed, forest_config$np))
+
+fig4a <- forest_config %>%
+  ggplot(aes(x = forest_cover, y = ed)) +
   geom_point(color = "#008300", alpha = 0.25, size = 1) +
   geom_smooth(method = "loess", se = TRUE, color = "grey20", linewidth = 0.8) +
-  facet_wrap(~ name, scales = "free_y") +
-  labs(x = "Forest cover (%)", y = NULL, title = "Forest fragmentation along the gradient")
+  coord_cartesian(ylim = c(0, y_max)) +
+  labs(x = "Forest cover (%)", y = "Forest edge density (m/ha)")
+
+fig4b <- forest_config %>%
+  ggplot(aes(x = forest_cover, y = np)) +
+  geom_point(color = "#008300", alpha = 0.25, size = 1) +
+  geom_smooth(method = "loess", se = TRUE, color = "grey20", linewidth = 0.8) +
+  coord_cartesian(ylim = c(0, y_max)) +
+  labs(x = "Forest cover (%)", y = "Number of forest patches")
+
+fig4 <- fig4a + fig4b +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(face = "bold"))
 fig4
 
 ### Fig 5 - Size of the forest fragment at the buffer center ----
@@ -170,4 +186,6 @@ ggsave(file.path(dir_output, "Figures", "fig1_forest_gradient.png"), fig1, width
 ggsave(file.path(dir_output, "Figures", "fig2_composition_profile.png"), fig2, width = 9, height = 5.5, dpi = 300, bg = "white")
 ggsave(file.path(dir_output, "Figures", "fig3_classes_gradient.png"), fig3, width = 9, height = 6, dpi = 300, bg = "white")
 ggsave(file.path(dir_output, "Figures", "fig4_forest_configuration.png"), fig4, width = 9, height = 4.5, dpi = 300, bg = "white")
+ggsave(file.path(dir_output, "Figures", "fig4a_forest_edge_density.png"), fig4a, width = 5, height = 4.5, dpi = 300, bg = "white")
+ggsave(file.path(dir_output, "Figures", "fig4b_forest_number_patches.png"), fig4b, width = 5, height = 4.5, dpi = 300, bg = "white")
 ggsave(file.path(dir_output, "Figures", "fig5_forest_fragment_area.png"), fig5, width = 8, height = 5.5, dpi = 300, bg = "white")
