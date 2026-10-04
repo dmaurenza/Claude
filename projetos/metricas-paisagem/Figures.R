@@ -3,347 +3,215 @@ library(tidyverse)
 library(rnaturalearth)
 library(ggspatial) # install.packages("ggspatial")
 library(geobr)
+library(terra)
 
-#af <- sf::read_sf("Data/SHP/limites_wgs94/limite_ma_wwf_200ecprregions_wgs84.shp")
-# af <- sf::read_sf("Data/SHP/limites_wgs94/limite_ma_lei_mata_atlantica_wgs84.shp")
-# 
-# af <- sf::read_sf("Data/SHP/limites_integradores_wgs84_v1_2_0/ma_limite_consensual_muylaert_et_al_2018_wgs84.shp")
+# Input files ----
 
+# Atlantic Forest limit (original extent)
 af <- sf::read_sf("Data/SHP/limites_integradores_wgs84_v1_2_0/ma_limite_integrador_muylaert_et_al_2018_wgs84_v1_1_0.shp")
 
+# CHANGED: current forest remnants (your layer)
+# - raster (.tif): set forest_values to the pixel values that mean forest
+#   (e.g. 1 for a forest / non-forest map; c(3, 4, 5, 6, 49) for MapBiomas collection codes)
+# - vector (.shp or .gpkg): every polygon is drawn as forest
+forest_now_path <- "Data/forest_remnants.tif"
+forest_values <- 1
+forest_now_year <- 2022 # only used in the legend
 
-plot(af$geometry)
-
-sa <- rnaturalearth::ne_countries(continent = "South America", returnclass = "sf")
-
-sa[sa$name_en == "Brazil","name_en"] <- ""
-
-biomes <- geobr::read_biomes()
-
-biomes[biomes$name_biome == "Amazônia","name_biome"] <- ""
-
-biomes <- biomes %>% 
-  filter(!name_biome %in% c("Sistema Costeiro", "Mata Atlântica"))
-
-biomes <- st_transform(biomes, crs = st_crs(sa))
-
+# Sampling sites
 database_gpkg <- read_sf("Results/full_database.gpkg")
 
-result <- database_gpkg %>% 
-  group_by(taxonGroup, datasetId, siteId) %>% 
-  distinct(scientificName, .keep_all = TRUE) %>% 
-  summarise(richness = n(), .groups = "drop")
-
-# # Bounding box da Mata Atlântica
-# bbox_af <- st_bbox(af)
-# 
-# # Expandir 1 grau em todas as direções
-# bbox_expandido <- st_bbox(c( xmin = as.numeric(bbox_af["xmin"]) - 25,
-#                              xmax = as.numeric(bbox_af["xmax"]) + 10,
-#                              ymin = as.numeric(bbox_af["ymin"]) - 5,
-#                              ymax = as.numeric(bbox_af["ymax"]) + 10),
-#                           crs = st_crs(af))
-# 
-# # Converter bbox para objeto sf
-# bbox_sf <- st_as_sfc(bbox_expandido)
-# 
-# # Recortar América do Sul
-# sa_crop <- st_crop(sa, bbox_sf)
-
-# Adjustis before map creation ----
-database_gpkg <- st_jitter(database_gpkg, amount = 0.2)
-
-database_gpkg$taxonGroup <- as.factor(database_gpkg$taxonGroup)
-
-biomes_label <- st_point_on_surface(biomes)
-
-biomes_label <- biomes_label |>
-  tidyr::crossing(taxonGroup = unique(result$taxonGroup))
-
+# Countries and Brazilian states
+sa <- rnaturalearth::ne_countries(continent = "South America", returnclass = "sf")
+sa[sa$name_en == "Brazil", "name_en"] <- ""
 sa_label <- st_point_on_surface(sa)
 
-sa_label <- sa_label %>% 
-  tidyr::crossing(taxonGroup = unique(result$taxonGroup))
+states <- geobr::read_state(code_state = "all", year = 2010, simplified = T) %>%
+  st_transform(crs = st_crs(sa))
 
-last_panel <- data.frame(
-  taxonGroup = tail(unique(result$taxonGroup), 1)
+# CHANGED: other biomes removed
+
+af <- st_transform(af, crs = st_crs(sa))
+af_v <- vect(af)
+
+# Map extent and shared theme ----
+
+map_xlim <- c(-60, -32)
+map_ylim <- c(-35, 0)
+
+map_theme <- theme(
+  panel.background = element_rect(fill = "white"),
+  plot.background = element_rect(fill = "white", color = NA),
+  panel.grid = element_blank(),
+  axis.title = element_blank(),
+  axis.ticks.length = unit(0.15, "cm"),
+  axis.text = element_text(size = 9, color = "black"),
+  panel.border = element_rect(fill = NA, color = "black", linewidth = 0.6),
+  legend.key = element_rect(fill = "white", color = NA),
+  legend.text = element_text(size = 10),
+  legend.title = element_text(size = 10, face = "bold"),
+  strip.background = element_rect(fill = "gray80", color = "black", linewidth = 0.6),
+  strip.text = element_text(size = 10)
 )
 
-richness_breaks <- quantile(result$richness, probs = seq(0, 1, length.out = 7))
+# CHANGED: boundaries are lines, so their legend keys are line segments (key_glyph = "path")
+boundary_colors <- c("Atlantic Forest limit" = "gray20",
+                     "Country boundaries" = "gray50",
+                     "State boundaries" = "gray75")
 
+boundary_layers <- function(af_fill = NA){
+  list(
+    geom_sf(data = sa, aes(color = "Country boundaries"), fill = NA,
+            linewidth = 0.3, key_glyph = "path"),
+    geom_sf(data = states, aes(color = "State boundaries"), fill = NA,
+            linewidth = 0.25, key_glyph = "path"),
+    geom_sf(data = af, aes(color = "Atlantic Forest limit"), fill = af_fill,
+            linewidth = 0.35, key_glyph = "path"),
+    geom_sf_text(data = states, aes(label = abbrev_state), size = 2.5,
+                 color = "black", check_overlap = TRUE),
+    geom_sf_text(data = sa_label, aes(geometry = geometry, label = name_en),
+                 size = 2.5, inherit.aes = FALSE),
+    scale_color_manual(name = NULL, values = boundary_colors, breaks = names(boundary_colors)),
+    coord_sf(xlim = map_xlim, ylim = map_ylim, expand = FALSE)
+  )
+}
 
-# Sampling Sites map ----
-map <- ggplot() +
-  geom_sf(data = sa,
-          aes(color = "Regional boundaries"),
-          fill = NA,
-          linewidth = 0.2) +
-  geom_sf_text(data = sa_label,
-               aes(geometry = geometry, label = name_en),
-               size = 3,
-               inherit.aes = FALSE)+
-    geom_sf(data = biomes,
-          aes(color = "Regional boundaries"),
-          fill = NA,
-          linewidth = 0.2) +
-  geom_sf_text(data = biomes_label,
-               aes(geometry = geom, label = name_biome),
-               size = 3,
-               inherit.aes = FALSE)+
-  geom_sf(data = af,
-          fill = "forestgreen",
-          aes(color = "Atlantic Forest limits"),
-          alpha = 0.4,
-          linewidth = 0.3) +
-  geom_sf(data = result,
-          aes(color = "Sampled sites"),
-          shape = 19, 
-          size = 1)+
-  annotation_north_arrow(
-    data = last_panel,
-    location = "tr",
-    which_north = "true",
-    style = north_arrow_fancy_orienteering(),
-    pad_x = unit(4, "cm"),
-    pad_y = unit(0.7, "cm"),
-    height = unit(1, "cm"),
-    width = unit(1, "cm")
-  )+
-  annotation_scale(
-    data = last_panel,
-    location = "bl",
-    width_hint = 0.2,
-    pad_x = unit(2.7, "cm"),
-    pad_y = unit(0.3, "cm"),
-    height = unit(0.15, "cm"),
-    width = unit(0.5, "cm")
-  ) +
-  coord_sf(xlim = c(-60, -32),
-           ylim = c(-35, 0),
-           expand = FALSE)+
+# Figure 1 - Original and current Atlantic Forest ----
+
+# CHANGED: reads the current forest layer (raster or vector)
+read_forest_now <- function(path, af_v, forest_values, max_cells = 1e6){
+
+  if(grepl("\\.tiff?$", path, ignore.case = TRUE)){
+    r <- rast(path)
+    r <- crop(r, project(af_v, crs(r)))
+    r <- r %in% forest_values # TRUE = forest
+
+    # coarser grid for mapping (a 30 m raster is too large to draw);
+    # each new cell is forest when most of it was forest
+    fact <- ceiling(sqrt(ncell(r) / max_cells))
+    if(fact > 1) r <- aggregate(r, fact = fact, fun = "mean", na.rm = TRUE)
+
+    r <- project(r, crs(af_v), method = "near") %>%
+      mask(af_v)
+
+    df <- as.data.frame(r, xy = TRUE)
+    names(df)[3] <- "forest"
+    df <- df %>% filter(forest >= 0.5)
+
+    list(type = "raster", data = df)
+
+  } else {
+    v <- read_sf(path) %>%
+      st_transform(crs = st_crs(af_v)) %>%
+      st_intersection(st_union(st_as_sf(af_v)))
+
+    list(type = "vector", data = v)
+  }
+}
+
+forest_now <- read_forest_now(forest_now_path, af_v, forest_values)
+
+forest_labels <- c("Original extent", paste0("Current forest remnants (", forest_now_year, ")"))
+forest_colors <- setNames(c("#d9ead3", "#1b7837"), forest_labels)
+
+if(forest_now$type == "raster"){
+  forest_layer <- geom_tile(data = forest_now$data,
+                            aes(x = x, y = y, fill = forest_labels[2]))
+} else {
+  forest_layer <- geom_sf(data = forest_now$data,
+                          aes(fill = forest_labels[2]), color = NA)
+}
+
+fig1 <- ggplot() +
+  geom_sf(data = af, aes(fill = forest_labels[1]), color = NA) +
+  forest_layer +
+  boundary_layers() +
+  scale_fill_manual(name = "Atlantic Forest", values = forest_colors, breaks = forest_labels) +
   scale_x_continuous(breaks = seq(-60, -32, by = 15)) +
-  scale_y_continuous(breaks = seq(-30, 0, by = 10))+
-    scale_color_manual(
-      name = "",
-      breaks = c("Atlantic Forest limits",
-                 "Regional boundaries",
-                 "Sampled sites"),
-      values = c(
-        "Atlantic Forest limits" = "gray50",
-        "Regional boundaries" = "gray50",
-        "Sampled sites" = "black"
-      )
-    ) +
-  # scale_size_binned(
-  #   name = "Riqueza",
-  #   breaks = richness_breaks,
-  #   range = c(1, 6),
-  #   labels = round(richness_breaks, 1)
-  # ) +
-  
-  theme( 
-    panel.background = element_rect(fill = "white"),
-    plot.background = element_rect(fill = "white"),
-    panel.grid = element_blank(),          # remove grid
-    axis.title = element_blank(),
-    axis.ticks.length = unit(0.15, "cm"),  # comprimento dos ticks
-    axis.text = element_text(size = 9),
-    panel.border = element_rect(fill = NA, color = "black", linewidth = 0.6),
-    legend.position = "right",
-    legend.box = "vertical",
-    legend.text = element_text(size = 12),
-    legend.margin = margin(t = 5, b = 5),
-    plot.margin = margin(10, 10, 30, 10),
-    
-    strip.background = element_rect(
-      fill = "gray80",
-      color = "black",
-      linewidth = 0.6
-    ),
-    strip.text = element_text(size = 10),
-    
-    )
+  scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
+  annotation_north_arrow(location = "tr", which_north = "true",
+                         style = north_arrow_fancy_orienteering(),
+                         height = unit(1, "cm"), width = unit(1, "cm")) +
+  annotation_scale(location = "bl", width_hint = 0.2, height = unit(0.15, "cm")) +
+  guides(fill = guide_legend(order = 1), color = guide_legend(order = 2)) +
+  map_theme +
+  theme(legend.position = c(0.98, 0.02), # legend inside the map, bottom right
+        legend.justification = c(1, 0),
+        legend.background = element_rect(fill = "white", color = NA))
+fig1
 
-map <- map +
-  facet_wrap(vars(taxonGroup))+
-  theme(legend.position = "right",
-        legend.box = "vertical")
-    
-map
+ggsave("Fig/Fig1_AtlanticForest.png", fig1, width = 7, height = 8, dpi = 600)
 
-ggsave("Fig/map.png", map)
+# Figure 2 - Kernel density of sampling sites (all groups + each group) ----
 
+# one point per site and taxonomic group
+sites_group <- database_gpkg %>%
+  distinct(taxonGroup, datasetId, siteId, .keep_all = TRUE) %>%
+  select(taxonGroup, datasetId, siteId)
 
-# Kernel map ----
-database_gpkg <- st_read("Results/full_database.gpkg")
+# CHANGED: in "All groups", a site sampled for several groups counts once
+sites_all <- sites_group %>%
+  distinct(datasetId, siteId, .keep_all = TRUE)
 
-result <- database_gpkg %>% 
-  group_by(taxonGroup, datasetId, siteId) %>% 
-  distinct(scientificName, .keep_all = TRUE) %>% 
-  summarise(richness = n(), .groups = "drop")
-poly <- af
-points <- result
+# Kernel density inside the Atlantic Forest limit
+# res: 0.045 degrees (~5 km); sigma: 0.225 degrees (~25 km)
+kernel_density <- function(points, af_v, res = 0.045, sigma = 0.225){
+  r <- rast(af_v, resolution = res)
 
-# Usando Terra
-library(terra)
-points_v <- vect(points)
-poly_v <- vect(poly)
+  p_raster <- rasterize(vect(points), r, fun = "count", background = 0) %>%
+    mask(af_v)
 
-# Criar raster com resolução adequada (maior resolução para evitar problemas)
-# 5000 m em graus (aproximadamente 0.045 graus)
-r <- rast(poly_v, resolution = 0.045, crs = crs(poly_v))
+  w <- focalMat(p_raster, sigma, type = "Gauss")
 
-# Rasterizar pontos
-p_raster <- rasterize(points_v, r, fun = "count", background = 0)
+  kde <- focal(p_raster, w = w, fun = "sum", na.rm = TRUE) %>%
+    mask(af_v)
 
-# Aplicar máscara
-p_raster <- mask(p_raster, poly_v)
+  df <- as.data.frame(kde, xy = TRUE)
+  names(df)[3] <- "Density"
+  df
+}
 
-# Verificar dimensões do raster
-print(dim(p_raster))
+# panel names with the number of sites
+groups <- sort(unique(sites_group$taxonGroup))
+panel_names <- c(paste0("All groups (n = ", nrow(sites_all), ")"),
+                 paste0(groups, " (n = ", table(sites_group$taxonGroup)[groups], ")"))
 
-kernel <- focalMat(p_raster, 0.225, type = "Gauss")
+kde_df <- bind_rows(
+  kernel_density(sites_all, af_v) %>% mutate(panel = panel_names[1]),
+  map2_dfr(groups, panel_names[-1], function(g, p){
+    kernel_density(filter(sites_group, taxonGroup == g), af_v) %>% mutate(panel = p)
+  })
+) %>%
+  mutate(panel = factor(panel, levels = panel_names))
 
-# Verificar tamanho do kernel
-print(dim(kernel))
+last_panel <- data.frame(panel = factor(tail(panel_names, 1), levels = panel_names))
 
-# Aplicar focal
-kde <- focal(p_raster, w = kernel, fun = "sum", na.rm = TRUE)
+# CHANGED: one-hue sequential palette that starts light (no white, no grey overlay);
+# cube-root scale to show low densities, legend in original units
+cube_root <- scales::trans_new("cube_root", function(x) x^(1/3), function(x) x^3)
 
-# Continuar com o processamento
-kde <- project(kde, crs(poly_v))
-kde <- mask(kde, poly_v)
+fig2 <- ggplot() +
+  geom_tile(data = kde_df, aes(x = x, y = y, fill = Density)) +
+  boundary_layers() + # CHANGED: Atlantic Forest limit drawn as an outline only
+  scale_fill_gradientn(name = "Kernel density\n(sites, cube-root scale)",
+                       colors = c("#fff7bc", "#fee391", "#fec44f", "#fe9929", "#d95f0e", "#993404"),
+                       trans = cube_root,
+                       breaks = function(l) signif(l[2] * c(0, 1/27, 8/27, 1), 1), # evenly spaced on the cube-root scale
+                       na.value = "transparent") +
+  scale_x_continuous(breaks = seq(-60, -32, by = 15)) +
+  scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
+  annotation_north_arrow(data = last_panel, location = "tr", which_north = "true",
+                         style = north_arrow_fancy_orienteering(),
+                         height = unit(0.8, "cm"), width = unit(0.8, "cm")) +
+  annotation_scale(data = last_panel, location = "bl", width_hint = 0.3,
+                   height = unit(0.15, "cm")) +
+  facet_wrap(vars(panel), ncol = 3) +
+  guides(fill = guide_colorbar(order = 1), color = guide_legend(order = 2)) +
+  map_theme +
+  theme(legend.position = "right")
+fig2
 
-# Aumentar destaque  
-kde_transformed <- kde^(1/3)
-
-kde_df <- as.data.frame(kde_transformed, xy = TRUE)
-names(kde_df)[3] <- "Density"
-
-poly_sf <- st_as_sf(poly_v)
-
-library(geobr)
-states <- geobr::read_state(code_state = "all", year = 2010, simplified = T)
-
-states_sf <- st_transform(states, 4326)
-
-# Kernel Density Map ----
-
-p <- ggplot() +
-  # Regional boundaries
-  geom_sf(data = sa,
-          aes(color = "Regional boundaries"),
-          fill = NA,
-          linewidth = 0.3) +
-  geom_sf_text(data = sa_label,
-               aes(geometry = geometry, label = name_en),
-               size = 2.5,
-               inherit.aes = FALSE) +
-  
-  # Raster KDE
-  geom_tile(data = kde_df,
-            aes(x = x, y = y, fill = Density)) +
-  
-  # Estados
-  geom_sf(data = states_sf,
-          fill = NA,
-          color = "gray80",
-          linewidth = 0.3) +
-  
-  # POLÍGONO DA MATA ATLÂNTICA
-  geom_sf(data = poly_sf,
-          aes(color = "Atlantic Forest limits"),
-          fill = "gray30",
-          linewidth = 0.3,
-          alpha = 0.3) +
-  
-  # Texto dos estados
-  geom_sf_text(data = states_sf,
-               aes(label = abbrev_state),
-               size = 3,
-               color = "black",
-               check_overlap = TRUE) + 
-  
-  # ESCALA PARA O RASTER
-  scale_fill_gradientn(
-    name = "Kernel Density",
-    colors = c("white", "yellow", "orange", "red", "darkred"),
-    na.value = "transparent"
-  ) +
-  
-  # ESCALA PARA AS LINHAS - com breaks definindo a ordem
-  scale_color_manual(
-    name = "",
-    values = c(
-      "Regional boundaries" = "gray50",
-      "Atlantic Forest limits" = "gray30"
-    ),
-    breaks = c("Regional boundaries", "Atlantic Forest limits")  # Ordem explícita
-  ) +
-  annotation_north_arrow(
-    data = last_panel,
-    location = "tr",
-    which_north = "true",
-    style = north_arrow_fancy_orienteering(),
-    pad_x = unit(1.5, "cm"),
-    pad_y = unit(0.7, "cm"),
-    height = unit(1, "cm"),
-    width = unit(1, "cm")
-  )+
-  annotation_scale(
-    data = last_panel,
-    location = "bl",
-    width_hint = 0.2,
-    pad_x = unit(3.1, "cm"),
-    pad_y = unit(0.3, "cm"),
-    height = unit(0.15, "cm"),
-    width = unit(0.5, "cm")
-  ) +
-  
-  # AJUSTE DA LEGENDA
-  guides(
-    color = guide_legend(
-      override.aes = list(
-        fill = c(NA, "gray30"),
-        alpha = c(NA, 0.3),
-        linewidth = c(0.2, 0.4)
-      )
-    )
-  ) +
-  
-  coord_sf(xlim = c(-60, -32),
-           ylim = c(-35, 0),
-           expand = FALSE) +
-  
-  theme_minimal() +
-  theme(
-    panel.background = element_rect(fill = "white", color = NA),
-    plot.background = element_rect(fill = "white", color = NA),
-    panel.grid.major = element_blank(),
-    panel.grid.minor = element_blank(),
-    axis.line = element_line(color = "black", linewidth = 0.3),
-    axis.ticks = element_line(color = "black", linewidth = 0.3),
-    axis.text = element_text(color = "black", size = 10),
-    axis.title = element_text(color = "black", size = 12),
-    legend.background = element_rect(fill = "white", color = NA),
-    legend.key = element_rect(fill = "white", color = NA),
-    legend.text = element_text(size = 12),
-    legend.title = element_text(size = 10, face = "bold"),
-    legend.position = c(0.77, 0.17),
-    legend.key.size = unit(0.4, "cm"),         # tamanho dos símbolos
-    legend.spacing.y = unit(0.1, "cm"), 
-    #legend.position = "right",
-    panel.border = element_rect(fill = NA, color = "black", linewidth = 0.5)
-  ) +
-  
-  labs(x = "", y = "")
-
-print(p)
-
-# Salvar com ggsave
-ggsave("./Fig/Kernel.png", p, dpi = 600)
-
-
+ggsave("Fig/Fig2_Kernel_groups.png", fig2, width = 11, height = 9, dpi = 600)
 
 
 rm(list = ls())
