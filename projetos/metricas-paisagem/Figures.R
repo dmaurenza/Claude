@@ -15,9 +15,9 @@ af <- sf::read_sf("Data/SHP/limites_integradores_wgs84_v1_2_0/ma_limite_integrad
 # - raster (.tif): set forest_values to the pixel values that mean forest
 #   (e.g. 1 for a forest / non-forest map; c(3, 4, 5, 6, 49) for MapBiomas collection codes)
 # - vector (.shp or .gpkg): every polygon is drawn as forest
-forest_now_path <- "Data/forest_remnants.tif"
-forest_values <- 1
-forest_now_year <- 2022 # only used in the legend
+forest_now_path <- "Data/TIFF/Atual/brazil_coverage-col11_2025.tif" # MapBiomas collection 11, Brazil only
+forest_values <- c(1, 3, 6, 4, 7, 5, 49) # check codes 1 and 7 in the collection 11 legend
+forest_now_year <- 2025 # only used in the legend
 
 # Sampling sites
 database_gpkg <- read_sf("Results/full_database.gpkg")
@@ -98,6 +98,9 @@ panel_titles <- c(paste0("All groups (n = ", nrow(sites_all), ")"),
 # sites of each panel, in the same order as panel_titles
 panel_sites <- c(list(sites_all),
                  map(groups, function(g) filter(sites_group, taxonGroup == g)))
+
+# check: number of sites in each panel (should differ between groups)
+tibble(panel = panel_titles, n_points = map_int(panel_sites, nrow))
 
 # CHANGED: panels a-g plus one space for the legend shared by all panels
 # (4 columns x 2 rows; the legend fills the space after the last map)
