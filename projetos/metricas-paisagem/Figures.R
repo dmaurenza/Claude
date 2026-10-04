@@ -79,7 +79,7 @@ boundary_layers <- function(af_fill = NA){
   )
 }
 
-# Sampling sites and kernel density ----
+# Sampling sites ----
 
 # one point per site and taxonomic group
 sites_group <- database_gpkg %>%
@@ -90,37 +90,38 @@ sites_group <- database_gpkg %>%
 sites_all <- sites_group %>%
   distinct(datasetId, siteId, .keep_all = TRUE)
 
-# Kernel density inside the Atlantic Forest limit
-# res: 0.045 degrees (~5 km); sigma: 0.225 degrees (~25 km)
-kernel_density <- function(points, af_v, res = 0.045, sigma = 0.225){
-  r <- rast(af_v, resolution = res)
+# panel titles with the number of sites: all groups first, then each group
+groups <- sort(unique(sites_group$taxonGroup))
+panel_titles <- c(paste0("All groups (n = ", nrow(sites_all), ")"),
+                  paste0(groups, " (n = ", table(sites_group$taxonGroup)[groups], ")"))
 
-  p_raster <- rasterize(vect(points), r, fun = "count", background = 0) %>%
-    mask(af_v)
+# sites of each panel, in the same order as panel_titles
+panel_sites <- c(list(sites_all),
+                 map(groups, function(g) filter(sites_group, taxonGroup == g)))
 
-  w <- focalMat(p_raster, sigma, type = "Gauss")
-
-  kde <- focal(p_raster, w = w, fun = "sum", na.rm = TRUE) %>%
-    mask(af_v)
-
-  df <- as.data.frame(kde, xy = TRUE)
-  names(df)[3] <- "Density"
-  df
+# CHANGED: panels a-g plus one space for the legend shared by all panels
+# (4 columns x 2 rows; the legend fills the space after the last map)
+combine_panels <- function(panels){
+  wrap_plots(c(panels, list(guide_area())), ncol = 4) +
+    plot_layout(guides = "collect") +
+    plot_annotation(tag_levels = "a", tag_suffix = ")") &
+    theme(plot.tag = element_text(face = "bold", size = 11),
+          plot.title = element_text(size = 10),
+          legend.box = "vertical",
+          legend.box.just = "left")
 }
 
-# one-hue sequential palette that starts light (no white, no grey overlay);
-# cube-root scale to show low densities, legend in original units
-cube_root <- scales::trans_new("cube_root", function(x) x^(1/3), function(x) x^3)
-
-kde_fill_scale <- function(){
-  scale_fill_gradientn(name = "Kernel density of sampling sites\n(cube-root scale)",
-                       colors = c("#fff7bc", "#fee391", "#fec44f", "#fe9929", "#d95f0e", "#993404"),
-                       trans = cube_root,
-                       breaks = function(l) signif(l[2] * c(0, 1/27, 8/27, 1), 1), # evenly spaced on the cube-root scale
-                       na.value = "transparent")
+# north arrow and scale bar (only in panel a)
+map_annotations <- function(){
+  list(
+    annotation_north_arrow(location = "tr", which_north = "true",
+                           style = north_arrow_fancy_orienteering(),
+                           height = unit(0.8, "cm"), width = unit(0.8, "cm")),
+    annotation_scale(location = "br", width_hint = 0.3, height = unit(0.15, "cm"))
+  )
 }
 
-# Figure 1A - Original and current Atlantic Forest, with sampling sites ----
+# Figure 1 - Original and current Atlantic Forest, with sampling sites ----
 
 # reads the current forest layer (raster or vector)
 read_forest_now <- function(path, af_v, forest_values, max_cells = 1e6){
@@ -166,91 +167,85 @@ if(forest_now$type == "raster"){
                           aes(fill = forest_labels[2]), color = NA)
 }
 
-fig1a <- ggplot() +
-  geom_sf(data = af, aes(fill = forest_labels[1]), color = NA) +
-  forest_layer +
-  # CHANGED: sampling sites
-  geom_sf(data = sites_all, aes(shape = "Sampling sites"), size = 0.6, color = "black") +
-  boundary_layers() +
-  scale_fill_manual(name = "Atlantic Forest", values = forest_colors, breaks = forest_labels) +
-  scale_shape_manual(name = NULL, values = c("Sampling sites" = 19)) +
-  scale_x_continuous(breaks = seq(-60, -30, by = 10)) +
-  scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
-  annotation_north_arrow(location = "tr", which_north = "true",
-                         style = north_arrow_fancy_orienteering(),
-                         height = unit(1, "cm"), width = unit(1, "cm")) +
-  # CHANGED: scale bar in the bottom right corner
-  annotation_scale(location = "br", width_hint = 0.2, height = unit(0.15, "cm")) +
-  guides(fill = guide_legend(order = 1, nrow = 2),
-         shape = guide_legend(order = 2, override.aes = list(size = 2)),
-         color = guide_legend(order = 3, nrow = 2)) +
-  map_theme +
-  theme(legend.position = "bottom",
-        legend.direction = "horizontal",
-        legend.box = "vertical",       # one legend per row, so nothing is cut
-        legend.box.just = "left")
-fig1a
+# one map: original extent, current remnants and the sampling sites of one panel
+sites_map <- function(points, title){
+  ggplot() +
+    geom_sf(data = af, aes(fill = forest_labels[1]), color = NA) +
+    forest_layer +
+    geom_sf(data = points, aes(shape = "Sampling sites"), size = 0.5, color = "black") +
+    boundary_layers() +
+    scale_fill_manual(name = "Atlantic Forest", values = forest_colors, breaks = forest_labels) +
+    scale_shape_manual(name = NULL, values = c("Sampling sites" = 19)) +
+    scale_x_continuous(breaks = seq(-60, -30, by = 10)) +
+    scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
+    guides(fill = guide_legend(order = 1),
+           shape = guide_legend(order = 2, override.aes = list(size = 2)),
+           color = guide_legend(order = 3)) +
+    labs(title = title) +
+    map_theme
+}
 
-# Figure 1B - Kernel density of sampling sites (all groups) ----
+fig1_panels <- map2(panel_sites, panel_titles, sites_map)
+fig1_panels[[1]] <- fig1_panels[[1]] + map_annotations()
 
-# CHANGED: former first panel of Figure 2
-kde_all <- kernel_density(sites_all, af_v)
-
-fig1b <- ggplot() +
-  geom_tile(data = kde_all, aes(x = x, y = y, fill = Density)) +
-  boundary_layers() + # Atlantic Forest limit drawn as an outline only
-  kde_fill_scale() +
-  scale_x_continuous(breaks = seq(-60, -30, by = 10)) +
-  scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
-  guides(fill = guide_colorbar(title.position = "top", barwidth = unit(6, "cm")),
-         color = "none") + # boundary legend already in 1A
-  map_theme +
-  theme(legend.position = "bottom")
-fig1b
-
-# Figure 1 - A and B side by side ----
-
-fig1 <- fig1a + fig1b +
-  plot_annotation(tag_levels = "A") &
-  theme(plot.tag = element_text(face = "bold"))
+fig1 <- combine_panels(fig1_panels)
 fig1
 
-ggsave("Fig/Fig1_AtlanticForest.png", fig1, width = 12, height = 8.5, dpi = 600)
-ggsave("Fig/Fig1A_AtlanticForest.png", fig1a, width = 6.5, height = 8.5, dpi = 600)
-ggsave("Fig/Fig1B_Kernel_all.png", fig1b, width = 6.5, height = 8.5, dpi = 600)
+ggsave("Fig/Fig1_Sampling_sites.png", fig1, width = 13, height = 9, dpi = 600)
 
-# Figure 2 - Kernel density of sampling sites, one panel per taxonomic group ----
+# Figure 2 - Kernel density of sampling sites (same layout as Figure 1) ----
 
-# panel names with the number of sites
-groups <- sort(unique(sites_group$taxonGroup))
-panel_names <- paste0(groups, " (n = ", table(sites_group$taxonGroup)[groups], ")")
+# Kernel density inside the Atlantic Forest limit
+# res: 0.045 degrees (~5 km); sigma: 0.225 degrees (~25 km)
+kernel_density <- function(points, af_v, res = 0.045, sigma = 0.225){
+  r <- rast(af_v, resolution = res)
 
-# CHANGED: only the taxonomic groups (the all-groups panel is now Figure 1B)
-kde_df <- map2_dfr(groups, panel_names, function(g, p){
-  kernel_density(filter(sites_group, taxonGroup == g), af_v) %>% mutate(panel = p)
-}) %>%
-  mutate(panel = factor(panel, levels = panel_names))
+  p_raster <- rasterize(vect(points), r, fun = "count", background = 0) %>%
+    mask(af_v)
 
-last_panel <- data.frame(panel = factor(tail(panel_names, 1), levels = panel_names))
+  w <- focalMat(p_raster, sigma, type = "Gauss")
 
-fig2 <- ggplot() +
-  geom_tile(data = kde_df, aes(x = x, y = y, fill = Density)) +
-  boundary_layers() + # Atlantic Forest limit drawn as an outline only
-  kde_fill_scale() +
-  scale_x_continuous(breaks = seq(-60, -30, by = 10)) +
-  scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
-  annotation_north_arrow(data = last_panel, location = "tr", which_north = "true",
-                         style = north_arrow_fancy_orienteering(),
-                         height = unit(0.8, "cm"), width = unit(0.8, "cm")) +
-  annotation_scale(data = last_panel, location = "br", width_hint = 0.3,
-                   height = unit(0.15, "cm")) +
-  facet_wrap(vars(panel), ncol = 3) +
-  guides(fill = guide_colorbar(order = 1), color = guide_legend(order = 2)) +
-  map_theme +
-  theme(legend.position = "right")
+  kde <- focal(p_raster, w = w, fun = "sum", na.rm = TRUE) %>%
+    mask(af_v)
+
+  df <- as.data.frame(kde, xy = TRUE)
+  names(df)[3] <- "Density"
+  df
+}
+
+kde_list <- map(panel_sites, kernel_density, af_v = af_v)
+
+# same color scale in every panel (needed for one shared legend)
+kde_max <- max(map_dbl(kde_list, function(d) max(d$Density, na.rm = TRUE)))
+
+# one-hue sequential palette that starts light (no white, no grey overlay);
+# cube-root scale to show low densities, legend in original units
+cube_root <- scales::trans_new("cube_root", function(x) x^(1/3), function(x) x^3)
+
+kde_map <- function(kde, title){
+  ggplot() +
+    geom_tile(data = kde, aes(x = x, y = y, fill = Density)) +
+    boundary_layers() + # Atlantic Forest limit drawn as an outline only
+    scale_fill_gradientn(name = "Kernel density of\nsampling sites\n(cube-root scale)",
+                         colors = c("#fff7bc", "#fee391", "#fec44f", "#fe9929", "#d95f0e", "#993404"),
+                         trans = cube_root,
+                         limits = c(0, kde_max),
+                         breaks = signif(kde_max * c(0, 1/27, 8/27, 1), 1), # evenly spaced on the cube-root scale
+                         na.value = "transparent") +
+    scale_x_continuous(breaks = seq(-60, -30, by = 10)) +
+    scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
+    guides(fill = guide_colorbar(order = 1), color = guide_legend(order = 2)) +
+    labs(title = title) +
+    map_theme
+}
+
+fig2_panels <- map2(kde_list, panel_titles, kde_map)
+fig2_panels[[1]] <- fig2_panels[[1]] + map_annotations()
+
+fig2 <- combine_panels(fig2_panels)
 fig2
 
-ggsave("Fig/Fig2_Kernel_groups.png", fig2, width = 11, height = 9, dpi = 600)
+ggsave("Fig/Fig2_Kernel_density.png", fig2, width = 13, height = 9, dpi = 600)
 
 
 rm(list = ls())
