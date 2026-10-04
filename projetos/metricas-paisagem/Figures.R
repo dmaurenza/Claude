@@ -197,7 +197,7 @@ fig1
 
 ggsave("Fig/Fig1_Sampling_sites.png", fig1, width = 9, height = 8, dpi = 600)
 
-# Figure 2 - Kernel density of sampling sites (same layout as Figure 1) ----
+# Figure 2 - Kernel density of sampling sites (a: all groups, b-g: each group) ----
 
 # Kernel density inside the Atlantic Forest limit
 # res: 0.045 degrees (~5 km); sigma: 0.225 degrees (~25 km)
