@@ -58,24 +58,37 @@ map_theme <- theme(
   strip.text = element_text(size = 10)
 )
 
-# CHANGED: boundaries are lines, so their legend keys are line segments (key_glyph = "path")
-boundary_colors <- c("Atlantic Forest limit" = "gray20",
-                     "Country boundaries" = "gray50",
-                     "State boundaries" = "gray75")
+# CHANGED: the Atlantic Forest limit gets its own color; countries and states differ by width and line type
+boundary_styles <- tibble(
+  name      = c("Atlantic Forest limit", "Country boundaries", "State boundaries"),
+  color     = c("#6a3d9a",               "black",              "gray50"),
+  linetype  = c("solid",                 "solid",              "dotted"),
+  linewidth = c(0.7,                     0.4,                  0.3)
+)
+
+# named vector (one value per boundary) for the manual scales
+boundary_values <- function(column) setNames(boundary_styles[[column]], boundary_styles$name)
 
 boundary_layers <- function(af_fill = NA){
   list(
-    geom_sf(data = sa, aes(color = "Country boundaries"), fill = NA,
-            linewidth = 0.3, key_glyph = "path"),
-    geom_sf(data = states, aes(color = "State boundaries"), fill = NA,
-            linewidth = 0.25, key_glyph = "path"),
-    geom_sf(data = af, aes(color = "Atlantic Forest limit"), fill = af_fill,
-            linewidth = 0.35, key_glyph = "path"),
+    # drawn from the least to the most important line, so the Atlantic Forest limit stays on top
+    geom_sf(data = states, aes(color = "State boundaries", linetype = "State boundaries",
+                               linewidth = "State boundaries"),
+            fill = NA, key_glyph = "path"),
+    geom_sf(data = sa, aes(color = "Country boundaries", linetype = "Country boundaries",
+                           linewidth = "Country boundaries"),
+            fill = NA, key_glyph = "path"),
+    geom_sf(data = af, aes(color = "Atlantic Forest limit", linetype = "Atlantic Forest limit",
+                           linewidth = "Atlantic Forest limit"),
+            fill = af_fill, key_glyph = "path"),
     geom_sf_text(data = states, aes(label = abbrev_state), size = 2.5,
                  color = "black", check_overlap = TRUE),
     geom_sf_text(data = sa_label, aes(geometry = geometry, label = name_en),
                  size = 2.5, inherit.aes = FALSE),
-    scale_color_manual(name = NULL, values = boundary_colors, breaks = names(boundary_colors)),
+    # same name and breaks in the three scales, so they merge into one legend
+    scale_color_manual(name = NULL, values = boundary_values("color"), breaks = boundary_styles$name),
+    scale_linetype_manual(name = NULL, values = boundary_values("linetype"), breaks = boundary_styles$name),
+    scale_linewidth_manual(name = NULL, values = boundary_values("linewidth"), breaks = boundary_styles$name),
     coord_sf(xlim = map_xlim, ylim = map_ylim, expand = FALSE)
   )
 }
@@ -191,7 +204,9 @@ sites_map <- function(points, title){
     scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
     guides(fill = guide_legend(order = 1),
            shape = guide_legend(order = 2, override.aes = list(size = 2)),
-           color = guide_legend(order = 3)) +
+           color = guide_legend(order = 3),
+           linetype = guide_legend(order = 3),   # same order as color: one legend for the boundaries
+           linewidth = guide_legend(order = 3)) +
     labs(title = title) +
     map_theme +
     theme(panel.grid.major = element_blank()) # CHANGED: no grid in Figure 1, only the ticks
@@ -257,7 +272,10 @@ kde_map <- function(kde, title){
                          na.value = "transparent") +
     scale_x_continuous(breaks = seq(-60, -30, by = 10)) +
     scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
-    guides(fill = guide_colorbar(order = 1), color = guide_legend(order = 2)) +
+    guides(fill = guide_colorbar(order = 1),
+           color = guide_legend(order = 2),
+           linetype = guide_legend(order = 2),   # same order as color: one legend for the boundaries
+           linewidth = guide_legend(order = 2)) +
     labs(title = title) +
     map_theme
 }
