@@ -131,20 +131,27 @@ read_forest_now <- function(path, af_v, forest_values, max_cells = 1e6){
 
   if(grepl("\\.tiff?$", path, ignore.case = TRUE)){
     r <- rast(path)
-    r <- crop(r, project(af_v, crs(r)))
-    r <- r %in% forest_values # TRUE = forest
 
-    # coarser grid for mapping (a 30 m raster is too large to draw);
-    # each new cell is forest when most of it was forest
+    # CHANGED: read only the Atlantic Forest extent, without copying the 30 m raster
+    # (crop() and %in% wrote full-resolution temporary files of several GB)
+    window(r) <- ext(project(af_v, crs(r)))
+
+    # coarser grid for mapping (a 30 m raster is too large to draw):
+    # share of forest pixels in each coarse cell, computed in a single pass
     fact <- ceiling(sqrt(ncell(r) / max_cells))
-    if(fact > 1) r <- aggregate(r, fact = fact, fun = "mean", na.rm = TRUE)
+    forest_share <- function(x, ...) mean(x %in% forest_values)
+    if(fact > 1){
+      r <- aggregate(r, fact = fact, fun = forest_share)
+    } else {
+      r <- r %in% forest_values
+    }
 
     r <- project(r, crs(af_v), method = "near") %>%
       mask(af_v)
 
     df <- as.data.frame(r, xy = TRUE)
     names(df)[3] <- "forest"
-    df <- df %>% filter(forest >= 0.5)
+    df <- df %>% filter(forest >= 0.5) # forest when most of the cell was forest
 
     list(type = "raster", data = df)
 
