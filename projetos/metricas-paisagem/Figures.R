@@ -4,6 +4,7 @@ library(rnaturalearth)
 library(ggspatial) # install.packages("ggspatial")
 library(geobr)
 library(terra)
+# terraOptions(tempdir = "D:/temp_terra") # optional: temporary files on a disk with free space
 library(patchwork) # install.packages("patchwork")
 
 # Input files ----
