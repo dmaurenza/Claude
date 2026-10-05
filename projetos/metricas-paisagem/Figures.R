@@ -200,10 +200,21 @@ sites_map <- function(points, title){
 # CHANGED: Figure 1 is a single map with all sampling sites (not split by taxonomic group)
 fig1 <- sites_map(sites_all, title = NULL) +
   map_annotations() +
-  theme(legend.position = "right")
+  # CHANGED: legend inside the map, bottom right corner (ocean), just above the scale bar
+  theme(legend.position = c(0.98, 0.08),     # x, y inside the panel (0 to 1)
+        legend.justification = c(1, 0),      # anchor the legend by its bottom right corner
+        legend.background = element_blank(),
+        legend.box.background = element_rect(fill = "white", color = "gray60", linewidth = 0.3), # one frame around all legends
+        legend.box.margin = margin(4, 6, 4, 6),
+        legend.box.just = "left",
+        legend.margin = margin(1, 0, 1, 0),
+        legend.spacing.y = unit(0.1, "cm"),
+        legend.title = element_text(size = 8, face = "bold"),
+        legend.text = element_text(size = 8),
+        legend.key.size = unit(0.4, "cm"))
 fig1
 
-ggsave("Fig/Fig1_Sampling_sites.png", fig1, width = 9, height = 8, dpi = 600)
+ggsave("Fig/Fig1_Sampling_sites.png", fig1, width = 7, height = 8, dpi = 600)
 
 # Figure 2 - Kernel density of sampling sites (a: all groups, b-g: each group) ----
 
