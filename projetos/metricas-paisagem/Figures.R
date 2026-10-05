@@ -120,10 +120,9 @@ print(tibble(panel = panel_titles, n_points = map_int(panel_sites, nrow)))
 # (the legend fills the space after the last map)
 combine_panels <- function(panels, ncol = 4){
   wrap_plots(c(panels, list(guide_area())), ncol = ncol) +
-    plot_layout(guides = "collect") +
-    plot_annotation(tag_levels = "a", tag_suffix = ")") &
-    theme(plot.tag = element_text(face = "bold", size = 11),
-          plot.title = element_text(size = 10),
+    plot_layout(guides = "collect") &
+    theme(plot.title = element_text(size = 10, face = "bold", margin = margin(0, 0, 2, 0)),
+          plot.margin = margin(2, 4, 2, 2), # CHANGED: smaller margins around each map
           legend.box = "vertical",
           legend.box.just = "left")
 }
@@ -277,16 +276,30 @@ kde_map <- function(kde, title){
            linetype = guide_legend(order = 2),   # same order as color: one legend for the boundaries
            linewidth = guide_legend(order = 2)) +
     labs(title = title) +
-    map_theme
+    map_theme +
+    theme(panel.grid.major = element_blank()) # CHANGED: no grid lines inside the maps, only the ticks
 }
 
-fig2_panels <- map2(kde_list, panel_titles, kde_map)
+# CHANGED: panel letter in the title line (no extra line for the tag)
+fig2_titles <- paste0(letters[seq_along(panel_titles)], ") ", panel_titles)
+
+fig2_panels <- map2(kde_list, fig2_titles, kde_map)
 fig2_panels[[1]] <- fig2_panels[[1]] + map_annotations()
 
-fig2 <- combine_panels(fig2_panels, ncol = 4) # CHANGED: 2 rows x 4 columns
+# CHANGED: coordinates only on the outer maps (left column and maps with nothing below);
+# inner maps keep the ticks, without the numbers
+fig2_ncol <- 4
+for(i in seq_along(fig2_panels)){
+  first_col <- (i - 1) %% fig2_ncol == 0
+  no_map_below <- i > length(fig2_panels) - fig2_ncol
+  if(!first_col) fig2_panels[[i]] <- fig2_panels[[i]] + theme(axis.text.y = element_blank())
+  if(!no_map_below) fig2_panels[[i]] <- fig2_panels[[i]] + theme(axis.text.x = element_blank())
+}
+
+fig2 <- combine_panels(fig2_panels, ncol = fig2_ncol) # 2 rows x 4 columns
 fig2
 
-ggsave("Fig/Fig2_Kernel_density.png", fig2, width = 13, height = 9, dpi = 600)
+ggsave("Fig/Fig2_Kernel_density.png", fig2, width = 12, height = 8, dpi = 600)
 
 
 rm(list = ls())
