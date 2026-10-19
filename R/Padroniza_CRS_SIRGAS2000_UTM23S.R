@@ -40,6 +40,12 @@ crs_manual <- c()
 epsg_graus_padrao <- 4674   # SIRGAS 2000 geografico
 epsg_utm_padrao   <- 31983  # SIRGAS 2000 / UTM 23S
 
+# grava tambem um GeoPackage unico com todas as camadas. GeoPackage e SQLite,
+# que precisa travar o arquivo ao gravar; em pasta de rede (NFS/SMB) isso
+# costuma falhar com "database is locked". Nesse caso o script avisa e segue
+# so com os shapefiles. Use FALSE para nem tentar.
+gravar_gpkg <- TRUE
+
 # permite abrir .shp mesmo sem o .shx ao lado (o GDAL reconstroi o indice)
 Sys.setenv(SHAPE_RESTORE_SHX = "YES")
 
@@ -141,7 +147,19 @@ for (arq in arquivos) {
     shp_saida <- file.path(pasta_saida, paste0(nome_saida, ".shp"))
     st_write(camada_utm, shp_saida, layer_options = "ENCODING=UTF-8",
              delete_dsn = file.exists(shp_saida), quiet = TRUE)
-    st_write(camada_utm, gpkg_saida, layer = nome_saida, quiet = TRUE)
+    if (gravar_gpkg) {
+      gpkg_ok <- tryCatch({
+        st_write(camada_utm, gpkg_saida, layer = nome_saida, quiet = TRUE)
+        TRUE
+      }, error = function(e) FALSE)
+      if (!gpkg_ok) {
+        warning("Nao foi possivel gravar o GeoPackage (", gpkg_saida, "). ",
+                "Provavel pasta de rede sem suporte a travamento do SQLite. ",
+                "Seguindo so com os shapefiles.", call. = FALSE)
+        gravar_gpkg <- FALSE
+        if (file.exists(gpkg_saida)) file.remove(gpkg_saida)
+      }
+    }
 
     bb <- st_bbox(camada_utm)
     resumo[[length(resumo) + 1]] <- data.frame(
