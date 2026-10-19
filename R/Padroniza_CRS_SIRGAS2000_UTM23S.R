@@ -115,6 +115,15 @@ for (arq in arquivos) {
   ext  <- tolower(tools::file_ext(arq))
   base <- tools::file_path_sans_ext(nome_arquivo)
 
+  # sem o .dbf ao lado o GDAL abre so a geometria, sem erro -- e as colunas
+  # de atributos somem da saida em silencio. Avisa para nao passar batido.
+  tem_dbf <- tolower(paste0(base, ".dbf")) %in% tolower(list.files(dirname(arq)))
+  if (ext == "shp" && !tem_dbf) {
+    warning(nome_arquivo, ": .dbf nao encontrado na pasta de entrada -> ",
+            "a saida tera so a geometria, sem as colunas de atributos.",
+            call. = FALSE)
+  }
+
   # um .gpkg pode ter varias camadas; um .shp tem uma so
   camadas <- st_layers(arq)$name
 
@@ -146,6 +155,7 @@ for (arq in arquivos) {
       camada      = lyr,
       saida       = nome_saida,
       n_feicoes   = nrow(camada_utm),
+      n_colunas   = ncol(st_drop_geometry(camada_utm)),
       crs_origem  = origem$crs$input,
       decisao_crs = origem$origem,
       xmin = round(bb[["xmin"]], 2), ymin = round(bb[["ymin"]], 2),
