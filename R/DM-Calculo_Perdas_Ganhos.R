@@ -26,7 +26,16 @@ dados$VBI       <- (dados$C_pos_imp - dados$C_pre_imp) * dados$a_imp
 # Local da compensacao
 dados$C_pre_off <- dados$M_pre_off / dados$Bi_off
 dados$C_pos_off <- dados$M_pos_off / dados$Bi_off
-dados$VBC       <- ((dados$C_pos_off - dados$C_pre_off) * y) / (1 + d)^t * dados$a_off
+
+# VBC: com os parametros (d, y, t) se incluir_vplbc = "Sim", sem eles se "Não"
+dados$VBC <- NA
+for (i in 1:nrow(dados)) {
+  if (dados$incluir_vplbc[i] == "Sim") {
+    dados$VBC[i] <- ((dados$C_pos_off[i] - dados$C_pre_off[i]) * y) / (1 + d)^t * dados$a_off[i]
+  } else {
+    dados$VBC[i] <- (dados$C_pos_off[i] - dados$C_pre_off[i]) * dados$a_off[i]
+  }
+}
 
 # DM = VBC - (-VBI)
 dados$DM <- dados$VBC - (-dados$VBI)
@@ -34,10 +43,8 @@ dados$DM <- dados$VBC - (-dados$VBI)
 dados[, c("componente", "VBI", "VBC", "DM")]
 
 # 4. Calcular o DM medio por componente ----
-# Usa apenas as linhas marcadas com "Sim" na coluna incluir_vplbc
-dados_media <- dados[dados$incluir_vplbc == "Sim", ]
-
-dm_medio <- aggregate(DM ~ componente, data = dados_media, FUN = mean)
+# Usa todas as linhas (Sim e Não)
+dm_medio <- aggregate(DM ~ componente, data = dados, FUN = mean)
 
 dm_medio
 
