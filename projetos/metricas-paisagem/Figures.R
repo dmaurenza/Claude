@@ -56,29 +56,27 @@ map_theme <- theme(
   strip.text = element_text(size = 10)
 )
 
-# boundaries differ by color, width and line type
+# boundaries differ by width and line type
+# CHANGED: no Atlantic Forest limit line (the original extent is shown by its fill)
 boundary_styles <- tibble(
-  name      = c("Atlantic Forest limit", "Country boundaries", "State boundaries"),
-  color     = c("#424242",               "#616161",              "#616161"),
-  linetype  = c("solid",                 "solid",              "longdash"),
-  linewidth = c(0.7,                     0.4,                  0.3)
+  name      = c("Country boundaries", "State boundaries"),
+  color     = c("#616161",            "#616161"),
+  linetype  = c("solid",              "longdash"),
+  linewidth = c(0.4,                  0.3)
 )
 
 # named vector (one value per boundary) for the manual scales
 boundary_values <- function(column) setNames(boundary_styles[[column]], boundary_styles$name)
 
-boundary_layers <- function(af_fill = NA){
+boundary_layers <- function(){
   list(
-    # drawn from the least to the most important line, so the Atlantic Forest limit stays on top
+    # states first, so country boundaries stay on top
     geom_sf(data = states, aes(color = "State boundaries", linetype = "State boundaries",
                                linewidth = "State boundaries"),
             fill = NA, key_glyph = "path"),
     geom_sf(data = sa, aes(color = "Country boundaries", linetype = "Country boundaries",
                            linewidth = "Country boundaries"),
             fill = NA, key_glyph = "path"),
-    geom_sf(data = af, aes(color = "Atlantic Forest limit", linetype = "Atlantic Forest limit",
-                           linewidth = "Atlantic Forest limit"),
-            fill = af_fill, key_glyph = "path"),
     geom_sf_text(data = states, aes(label = abbrev_state), size = 2.5,
                  color = "black", check_overlap = TRUE),
     geom_sf_text(data = sa_label, aes(geometry = geometry, label = name_en),
@@ -197,14 +195,15 @@ sites_map <- function(points, title){
   ggplot() +
     geom_sf(data = af, aes(fill = forest_labels[1]), color = NA) +
     forest_layer +
-    geom_sf(data = points, aes(shape = "Sampling sites"), size = point_size, color = "black") +
+    geom_sf(data = points, aes(shape = "Sampling sites"), size = point_size, color = "#f1a340", alpha = 0.5) +
     boundary_layers() +
     scale_fill_manual(name = "Atlantic Forest", values = forest_colors, breaks = forest_labels) +
     scale_shape_manual(name = NULL, values = c("Sampling sites" = 19)) +
     scale_x_continuous(breaks = seq(-60, -30, by = 10)) +
     scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
     guides(fill = guide_legend(order = 1),
-           shape = guide_legend(order = 2, override.aes = list(size = 2)),
+           # CHANGED: legend point opaque and larger (the map points are transparent and small)
+           shape = guide_legend(order = 2, override.aes = list(size = 3, alpha = 1)),
            color = guide_legend(order = 3),
            linetype = guide_legend(order = 3),   # same order as color: one legend for the boundaries
            linewidth = guide_legend(order = 3)) +
