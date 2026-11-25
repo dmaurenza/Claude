@@ -195,15 +195,18 @@ sites_map <- function(points, title){
   ggplot() +
     geom_sf(data = af, aes(fill = forest_labels[1]), color = NA) +
     forest_layer +
-    geom_sf(data = points, aes(shape = "Sampling sites"), size = point_size, color = "#f1a340", alpha = 0.5) +
+    # CHANGED: shape 21 = circle with outline; fill = orange, color = black outline, stroke = outline width
+    geom_sf(data = points, aes(shape = "Sampling sites"), size = point_size,
+            fill = "#f1a340", color = "black", stroke = 0.2, alpha = 0.5) +
     boundary_layers() +
     scale_fill_manual(name = "Atlantic Forest", values = forest_colors, breaks = forest_labels) +
-    scale_shape_manual(name = NULL, values = c("Sampling sites" = 19)) +
+    scale_shape_manual(name = NULL, values = c("Sampling sites" = 21)) + # CHANGED: 19 -> 21
     scale_x_continuous(breaks = seq(-60, -30, by = 10)) +
     scale_y_continuous(breaks = seq(-30, 0, by = 10)) +
     guides(fill = guide_legend(order = 1),
            # CHANGED: legend point opaque and larger (the map points are transparent and small)
-           shape = guide_legend(order = 2, override.aes = list(size = 3, alpha = 1)),
+           shape = guide_legend(order = 2, override.aes = list(size = 3, alpha = 1, fill = "#f1a340",
+                                                               color = "black", stroke = 0.4)),
            color = guide_legend(order = 3),
            linetype = guide_legend(order = 3),   # same order as color: one legend for the boundaries
            linewidth = guide_legend(order = 3)) +
